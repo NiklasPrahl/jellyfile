@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+bun.lock
+
+# Logs and temp files
+*.log
+pipeline_error.log
+error.log
+stdout.log
+err.txt
+out.txt
+.tmp/
+.temp/
+
+# Configuration
+config.json
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build output (if any)
+dist/
+build/
+
+# Agent Documentation
+docs/
