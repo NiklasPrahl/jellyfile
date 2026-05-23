@@ -1,4 +1,4 @@
-import { mkdirSync, appendFileSync } from "node:fs"
+import { mkdirSync, appendFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import type { MovieFile, AppConfig } from "../types"
 import { convertToMp4 } from "./handbrake"
@@ -32,18 +32,21 @@ export async function runPipeline(
 
     try {
       const baseName = `${plexName(m)} - [${m.confirmedFormat}]`
+      const movieDir = join(config.outputDir, plexName(m))
 
       // 1. Convert MKV -> MP4 (if needed)
       let mp4Path: string | undefined
       if (m.conversionMode !== "mkv_only") {
         m.status = "converting"
-        // Force initial update at 0%
         onUpdate(movies, i, 0)
 
+        const preset = 
+          m.confirmedFormat === "Blu-ray_4K" ? config.handbrakePreset4K :
+          m.confirmedFormat === "Blu-ray" ? config.handbrakePresetBluRay :
+          config.handbrakePresetDVD
+
         const mp4Tmp = join(tmpDir, `${m.id}.mp4`)
-        const res = await convertToMp4(m.originalPath, mp4Tmp, config.handbrakePreset, config.handbrakePath, (pct) => {
-          // IMPORTANT: HandBrake sends 100% only at the very end. 
-          // If we jump to 100% immediately, the regex might be matching something wrong.
+        const res = await convertToMp4(m.originalPath, mp4Tmp, preset, config.handbrakePath, (pct) => {
           onUpdate(movies, i, pct)
         })
 
@@ -61,14 +64,12 @@ export async function runPipeline(
       m.status = "subtitles"
       onUpdate(movies, i, 0)
 
-      const movieDir = join(config.outputDir, plexName(m))
       let foundLangs: string[] = []
       
       if (m.originalPath.toLowerCase().endsWith(".mkv")) {
         try {
-          // Folder creation MUST happen here, ONLY when we actually have files to put there
+          // Folder is ONLY created here if we actually start subtitle extraction
           mkdirSync(movieDir, { recursive: true })
-          
           const extRes = await extractSubtitles(
             m.originalPath, movieDir, baseName, 
             config.mkvmergePath, config.mkvextractPath, ["en", "de"]
@@ -81,7 +82,6 @@ export async function runPipeline(
 
       if (config.opensubsApiKey && foundLangs.length < 2) {
         try {
-          // Ensure folder exists for downloads too
           mkdirSync(movieDir, { recursive: true })
           await downloadSubtitles(
             m.resolvedTitle, m.resolvedYear, movieDir, baseName,
@@ -97,14 +97,13 @@ export async function runPipeline(
       m.status = "organizing"
       onUpdate(movies, i, 0)
       
-      // Final folder check
+      // Ensure folder exists before moving/copying
       mkdirSync(movieDir, { recursive: true })
       organizeMovie(m, config.outputDir, mp4Path)
 
       // Cleanup original MKV if mp4_only
       if (m.conversionMode === "mp4_only" && m.originalPath.toLowerCase().endsWith(".mkv")) {
         try {
-          const { unlinkSync } = await import("node:fs")
           unlinkSync(m.originalPath)
         } catch (e) {
           logError(e, `Cleanup MKV: ${m.originalName}`)

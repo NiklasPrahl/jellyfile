@@ -6,22 +6,41 @@ const CONFIG_FILE = join(import.meta.dir, "..", "config.json")
 
 export function loadConfig(): AppConfig {
   const defaults: AppConfig = {
-    llmProvider: (process.env.LLM_PROVIDER as any) || "gemini",
-    geminiApiKey: process.env.GEMINI_API_KEY || "",
-    groqApiKey: process.env.GROQ_API_KEY || "",
-    ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
-    ollamaModel: process.env.OLLAMA_MODEL || "llama3",
-    opensubsApiKey: process.env.OPENSUBTITLES_API_KEY || "",
-    opensubsUsername: process.env.OPENSUBTITLES_USERNAME || "",
-    opensubsPassword: process.env.OPENSUBTITLES_PASSWORD || "",
-    handbrakePreset: process.env.HANDBRAKE_PRESET || "HQ 1080p30 Surround",
-    handbrakePath: process.env.HANDBRAKE_PATH || "HandBrakeCLI",
-    mkvmergePath: process.env.MKVMERGE_PATH || "mkvmerge",
-    mkvextractPath: process.env.MKVEXTRACT_PATH || "mkvextract",
-    sourceDir: process.env.SOURCE_DIR || "./input",
-    outputDir: process.env.OUTPUT_DIR || "./output",
+    llmProvider: "gemini",
+    geminiApiKey: "",
+    groqApiKey: "",
+    ollamaBaseUrl: "http://localhost:11434",
+    ollamaModel: "llama3",
+    opensubsApiKey: "",
+    opensubsUsername: "",
+    opensubsPassword: "",
+    handbrakePresetDVD: "HQ 480p30 Surround",
+    handbrakePresetBluRay: "HQ 1080p30 Surround",
+    handbrakePreset4K: "Super HQ 2160p60 4K HEVC Surround",
+    handbrakePath: "HandBrakeCLI",
+    mkvmergePath: "mkvmerge",
+    mkvextractPath: "mkvextract",
+    sourceDir: "./input",
+    outputDir: "./output",
   }
 
+  // Load from environment variables first (as base)
+  const envMap: Record<string, keyof AppConfig> = {
+    LLM_PROVIDER: "llmProvider",
+    GEMINI_API_KEY: "geminiApiKey",
+    GROQ_API_KEY: "groqApiKey",
+    OLLAMA_BASE_URL: "ollamaBaseUrl",
+    OLLAMA_MODEL: "ollamaModel",
+    OPENSUBTITLES_API_KEY: "opensubsApiKey",
+    SOURCE_DIR: "sourceDir",
+    OUTPUT_DIR: "outputDir",
+  }
+
+  for (const [env, key] of Object.entries(envMap)) {
+    if (process.env[env]) (defaults as any)[key] = process.env[env]
+  }
+
+  // Then override with config.json (persistent settings)
   if (existsSync(CONFIG_FILE)) {
     try {
       const saved = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"))

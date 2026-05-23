@@ -35,7 +35,9 @@ export interface AppConfig {
   opensubsApiKey: string
   opensubsUsername: string
   opensubsPassword: string
-  handbrakePreset: string
+  handbrakePresetDVD: string
+  handbrakePresetBluRay: string
+  handbrakePreset4K: string
   handbrakePath: string
   mkvmergePath: string
   mkvextractPath: string
@@ -43,4 +45,4 @@ export interface AppConfig {
   outputDir: string
 }
 
-export type AppView = "scan" | "review" | "settings" | "progress"
+export type AppView = "init" | "scan" | "review" | "settings" | "progress"

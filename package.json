@@ -1,6 +1,6 @@
 {
-  "name": "plex-ingest",
-  "version": "1.0.0",
+  "name": "jellyfile",
+  "version": "0.0.2",
   "type": "module",
   "scripts": {
     "start": "bun run src/index.tsx",

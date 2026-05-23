@@ -1,16 +1,16 @@
-# PLEX INGEST - Blu-ray Digitization Pipeline TUI
+# JELLYFILE - Movie Disc Digitization Pipeline TUI
 
 Built with OpenTUI (https://opentui.com).
 
-MakeMKV output -> Title Resolution -> Format Tagging -> HandBrake Conversion -> Subtitle Download -> Plex Library
+MakeMKV output -> Title Resolution -> Format Tagging -> HandBrake Conversion -> Subtitle Download -> Movie Library
 
 ## Features
 - Scan MakeMKV output folders for MKV files
-- AI Title Resolution via Google Gemini 2.0 Flash (free tier)
-- Auto-detect media format (DVD / Blu-ray / 4K) from file size, manually adjustable
-- HandBrake conversion MKV to MP4 with configurable presets
-- Subtitle download (EN + DE) via OpenSubtitles API
-- Plex-compatible output structure
+- AI Title Resolution via Multi-Provider LLM (Gemini, Groq, Ollama)
+- Auto-detect media format (DVD / Blu-ray / 4K) via resolution metadata
+- HandBrake conversion MKV to MP4 with per-format presets
+- Subtitle extraction from MKV + download (EN + DE) via OpenSubtitles
+- Media-compatible output structure
 - Settings panel for all API keys and paths
 
 ## Output Structure
@@ -23,26 +23,23 @@ MakeMKV output -> Title Resolution -> Format Tagging -> HandBrake Conversion -> 
 ## Prerequisites
 - Bun (https://bun.sh, v1.0+)
 - HandBrakeCLI (https://handbrake.fr/downloads2.php)
-- Google Gemini API Key (free: https://aistudio.google.com/apikey)
-- OpenSubtitles API Key (free: https://www.opensubtitles.com/consumers)
+- MKVToolNix (mkvmerge, mkvextract)
 
 ## Setup
-    cd plex-ingest
+    cd jellyfile
     bun install
     cp .env.example .env
     # Edit .env with your API keys
     bun run start
 
 ## TUI Controls
-T=Settings  S=Scan  R=Review  P=Process
-Up/Down=Navigate  F=Cycle format  K=Toggle keep MKV
-Enter=Execute  Esc=Cancel  Q=Quit
+S=Settings  Up/Down=Navigate  Enter=Execute  Esc=Cancel/Back  Q=Quit
+F=Cycle format  M=Cycle conversion mode  E=Edit Title  Y=Edit Year
 
 ## Workflow
-1. Settings - Configure API keys and directories
-2. Scan - Enter to scan source dir and resolve titles via Gemini
-3. Review - Adjust formats, toggle MKV retention, verify titles
-4. Process - Enter to start HandBrake + subtitles + file organization
+1. Initial Setup - Confirm input/output directories
+2. Scan - Resolve titles via LLM
+3. Review - Adjust formats, modes, and verify titles
+4. Process - HandBrake + subtitles + organization
 
-All interactive decisions happen BEFORE conversion so HandBrake runs unattended.
-
+All interactive decisions happen BEFORE conversion so processing runs unattended.
