@@ -7,10 +7,10 @@ const CONFIG_FILE = join(import.meta.dir, "..", "config.json")
 export function loadConfig(): AppConfig {
   const defaults: AppConfig = {
     llmProvider: "gemini",
-    geminiApiKey: "",
-    groqApiKey: "",
-    ollamaBaseUrl: "http://localhost:11434",
-    ollamaModel: "llama3",
+    geminiApiKey: process.env.GEMINI_API_KEY || "",
+    groqApiKey: process.env.GROQ_API_KEY || "",
+    ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+    ollamaModel: process.env.OLLAMA_MODEL || "llama3",
     opensubsApiKey: "",
     opensubsUsername: "",
     opensubsPassword: "",
@@ -20,34 +20,21 @@ export function loadConfig(): AppConfig {
     handbrakePath: "HandBrakeCLI",
     mkvmergePath: "mkvmerge",
     mkvextractPath: "mkvextract",
-    sourceDir: "./input",
-    outputDir: "./output",
+    sourceDir: process.env.SOURCE_DIR || "./input",
+    outputDir: process.env.OUTPUT_DIR || "./output",
     folderPattern: "{title} ({year})",
     filePattern: "{title} ({year}) - [{format}]",
   }
 
-  // Load from environment variables first (as base)
-  const envMap: Record<string, keyof AppConfig> = {
-    LLM_PROVIDER: "llmProvider",
-    GEMINI_API_KEY: "geminiApiKey",
-    GROQ_API_KEY: "groqApiKey",
-    OLLAMA_BASE_URL: "ollamaBaseUrl",
-    OLLAMA_MODEL: "ollamaModel",
-    OPENSUBTITLES_API_KEY: "opensubsApiKey",
-    SOURCE_DIR: "sourceDir",
-    OUTPUT_DIR: "outputDir",
-  }
-
-  for (const [env, key] of Object.entries(envMap)) {
-    if (process.env[env]) (defaults as any)[key] = process.env[env]
-  }
-
-  // Then override with config.json (persistent settings)
   if (existsSync(CONFIG_FILE)) {
     try {
-      const saved = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"))
-      Object.assign(defaults, saved)
-    } catch {}
+      return { ...defaults, ...JSON.parse(readFileSync(CONFIG_FILE, "utf-8")) }
+    } catch (e) {
+      console.error("Error parsing config.json, using defaults.", e)
+    }
+  } else {
+    // Create config.json with current environment/defaults if it doesn't exist
+    saveConfig(defaults)
   }
 
   return defaults

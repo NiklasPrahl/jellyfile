@@ -42,17 +42,11 @@ A specialized TUI-based pipeline for automated movie disc digitization and organ
    bun install
    ```
 
-3. **Configure the application:**
-   Copy the example environment file and fill in your settings:
-   ```bash
-   cp .env.example .env
-   # Edit .env and configure your paths and API keys
-   ```
-
-4. **Run the application:**
+3. **Run the application:**
    ```bash
    bun run src/index.tsx
    ```
+   *The application will automatically initialize a `config.json` file on the first run. You can manage all your settings, including API keys and paths, via the in-app Settings menu (press `S`).*
 
 ---
 
