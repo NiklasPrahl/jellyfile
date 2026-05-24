@@ -358,7 +358,6 @@ function renderScan(): any[] {
     if (movies.length > scanVisible) {
       out.push(Box({ width: "100%", alignItems: "center", marginTop: 0 }, Text({ content: t`${fg(C.dim)(`... and ${movies.length - scanVisible} more`)}` })))
     }
-    out.push(Box({ width: "100%", alignItems: "center", marginTop: 1 }, Text({ content: t`${bold(fg(C.accent)("Press ENTER to proceed."))}` })))
   } else {
     out.push(Box({ width: "100%", flexGrow: 1, justifyContent: "center", alignItems: "center" }, Text({ content: t`${fg(C.accent)("Press ENTER to scan.")}` })))
   }
@@ -374,6 +373,15 @@ function renderReview(): any[] {
     )
   ]
   
+  // Table Header
+  out.push(Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1, borderStyle: "single", borderColor: C.border, marginBottom: 0 },
+    Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("#"))}` })),
+    Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
+    Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
+    Box({ width: 10 }, Text({ content: t`${bold(fg(C.dim)("MODE"))}` })),
+    Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
+  ))
+
   const reviewVisible = 6
   const start = Math.max(0, Math.min(sel - Math.floor(reviewVisible / 2), movies.length - reviewVisible))
   const slice = movies.slice(start, start + reviewVisible)
@@ -386,6 +394,7 @@ function renderReview(): any[] {
     listBox.add(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
       Box({ width: 4 }, Text({ content: t`${fg(rc)((isSel ? "\u25B8" : " ") + (actualIdx + 1).toString())}` })),
       Box({ width: 14 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
+      Box({ width: 8 }, Text({ content: t`${fg(rc)(m.resolvedYear || "----")}` })),
       Box({ width: 10 }, Text({ content: t`${fg(rc)(`(${modeLabels[m.conversionMode]})`)}` })),
       Box({ flexGrow: 1 }, Text({ content: t`${fg(rc)(m.resolvedTitle.substring(0, 40))}` }))
     ))
@@ -396,8 +405,8 @@ function renderReview(): any[] {
     const m = movies[sel]
     out.push(Box({ flexDirection: "column", borderStyle: "rounded", borderColor: C.accent, paddingLeft: 2, paddingRight: 2, width: "100%", backgroundColor: "#0d1117" },
       Text({ content: t`${bold(fg(C.accent)(` PREVIEW: ${m.resolvedTitle}${m.resolvedYear ? ` (${m.resolvedYear})` : ""}`))}` }),
-      Text({ content: t`${fg(C.dim)(` Path: .../${m.originalName.substring(m.originalName.length - 40)}`)}` }),
-      Text({ content: t`${fg(C.dim)(` Settings: ${m.confirmedFormat} | ${m.conversionMode} | ${m.sizeHuman}`)}` })
+      Text({ content: t`${fg(C.dim)(` Original: ${m.originalName.substring(0, 60)}${m.originalName.length > 60 ? "..." : ""}`)}` }),
+      Text({ content: t`${fg(C.dim)(` Details: ${m.confirmedFormat} | ${m.conversionMode} | ${m.sizeHuman}`)}` })
     ))
   }
   return out
@@ -406,6 +415,15 @@ function renderReview(): any[] {
 // ── Progress View ──────────────────────────────────────────────────────────
 function renderProgress(): any[] {
   const out: any[] = [Box({ width: "100%", alignItems: "center", marginBottom: 1 }, Text({ content: t`${bold(fg(C.text)("Step 3: Processing"))}` }))]
+  
+  // Table Header
+  out.push(Box({ flexDirection: "row", paddingLeft: 4, paddingRight: 4, width: "100%", height: 1, borderStyle: "single", borderColor: C.border, marginBottom: 0 },
+    Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("!"))}` })),
+    Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("STATUS"))}` })),
+    Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
+    Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
+  ))
+
   const progressVisible = 6
   const start = Math.max(0, Math.min(Math.max(0, procIdx - 2), Math.max(0, movies.length - progressVisible)))
   
@@ -419,8 +437,9 @@ function renderProgress(): any[] {
     
     listBox.add(Box({ flexDirection: "row", gap: 2, paddingLeft: 4, paddingRight: 4, width: "100%", height: 1 }, 
       Box({ width: 2 }, Text({ content: t`${fg(color)(icon)}` })),
-      Box({ flexGrow: 1 }, Text({ content: t`${fg(color)(m.resolvedTitle.substring(0, 50))}` })),
-      Box({ width: 12 }, Text({ content: t`${fg(color)(m.status.toUpperCase())}` }))
+      Box({ width: 14 }, Text({ content: t`${fg(color)(m.status.toUpperCase())}` })),
+      Box({ width: 14 }, Text({ content: t`${fg(color)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
+      Box({ flexGrow: 1 }, Text({ content: t`${fg(color)(m.resolvedTitle.substring(0, 40))}` }))
     ))
   }
   out.push(listBox)
@@ -505,7 +524,7 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
       if (!movies.length) { error = `No files found!`; render(); return }
       status = `Resolving titles...`; render()
       await resolveTitles(movies, config, (i, n) => { status = `Resolving: ${i}/${n}`; render() })
-      status = `Done! ENTER to proceed.`; render()
+      status = `Scan complete.`; render()
     } catch (e) { error = e instanceof Error ? e.message : String(e); render() }
     return
   }
