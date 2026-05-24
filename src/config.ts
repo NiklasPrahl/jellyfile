@@ -22,6 +22,8 @@ export function loadConfig(): AppConfig {
     mkvextractPath: "mkvextract",
     sourceDir: "./input",
     outputDir: "./output",
+    folderPattern: "{title} ({year})",
+    filePattern: "{title} ({year}) - [{format}]",
   }
 
   // Load from environment variables first (as base)

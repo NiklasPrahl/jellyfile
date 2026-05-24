@@ -35,6 +35,8 @@ const SETTINGS_GROUPS = [
     items: [
       { key: "sourceDir" as const, label: "Input Directory", secret: false },
       { key: "outputDir" as const, label: "Output Directory", secret: false },
+      { key: "folderPattern" as const, label: "Folder Pattern", secret: false },
+      { key: "filePattern" as const, label: "File Pattern", secret: false },
     ]
   },
   {

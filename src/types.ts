@@ -43,6 +43,8 @@ export interface AppConfig {
   mkvextractPath: string
   sourceDir: string
   outputDir: string
+  folderPattern: string
+  filePattern: string
 }
 
 export type AppView = "init" | "scan" | "review" | "settings" | "progress"

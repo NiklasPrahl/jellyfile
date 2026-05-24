@@ -99,7 +99,7 @@ export async function runPipeline(
       
       // Ensure folder exists before moving/copying
       mkdirSync(movieDir, { recursive: true })
-      organizeMovie(m, config.outputDir, mp4Path)
+      organizeMovie(m, config.outputDir, config, mp4Path)
 
       // Cleanup original MKV if mp4_only
       if (m.conversionMode === "mp4_only" && m.originalPath.toLowerCase().endsWith(".mkv")) {
