@@ -31,8 +31,8 @@ export async function runPipeline(
     if (m.status === "error" || m.status === "done") continue
 
     try {
-      const baseName = `${plexName(m)} - [${m.confirmedFormat}]`
-      const movieDir = join(config.outputDir, plexName(m))
+      const baseName = `${plexName(m, config)} - [${m.confirmedFormat}]`
+      const movieDir = join(config.outputDir, plexName(m, config))
 
       // 1. Convert MKV -> MP4 (if needed)
       let mp4Path: string | undefined

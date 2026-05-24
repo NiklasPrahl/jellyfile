@@ -207,12 +207,15 @@ function render() {
               height: "100%",
               flexDirection: "column",
               backgroundColor: C.panel,
-              padding: 1,
+              paddingLeft: 2,
+              paddingRight: 2,
+              paddingTop: 1,
+              paddingBottom: 1,
               flexGrow: 1
             },
             ...[
-              error ? Box({ paddingLeft: 1, marginBottom: 0, width: "100%" }, Text({ content: t`${fg(C.red)(("\u2717 " + error).substring(0, 70))}` })) : null,
-              status && !isProcessing ? Box({ paddingLeft: 1, marginBottom: 0, width: "100%" }, Text({ content: t`${fg(C.green)(("\u25CF " + status).substring(0, 70))}` })) : null,
+              error ? Box({ paddingLeft: 1, marginBottom: 1, width: "100%" }, Text({ content: t`${fg(C.red)(("\u2717 " + error).substring(0, 70))}` })) : null,
+              status && !isProcessing ? Box({ paddingLeft: 1, marginBottom: 1, width: "100%" }, Text({ content: t`${fg(C.green)(("\u25CF " + status).substring(0, 70))}` })) : null,
               ...mainContent
             ].filter(Boolean)
           )
@@ -342,13 +345,18 @@ function renderSettings(): any[] {
 function renderScan(): any[] {
   const out: any[] = [Box({ width: "100%", alignItems: "center", marginBottom: 1 }, Text({ content: t`${bold(fg(C.text)("Step 1: Scan Source Directory"))}` }))]
   if (movies.length > 0) {
-    out.push(Text({ content: t`${bold(fg(C.accent)(`Found ${movies.length} files:`))}` }))
-    const scanVisible = 6
+    out.push(Box({ width: "100%", alignItems: "center", marginBottom: 1 }, Text({ content: t`${bold(fg(C.accent)(`Found ${movies.length} files:`))}` })))
+    const scanVisible = 8
+    const scanBox = Box({ flexDirection: "column", width: "100%", alignItems: "center" })
     for (const m of movies.slice(0, scanVisible)) {
-      out.push(Box({ flexDirection: "row", gap: 2, paddingLeft: 2, width: "100%" },
-        Box({ width: 10 }, Text({ content: t`${fg(C.green)(m.sizeHuman.padStart(8))}` })),
-        Box({ flexGrow: 1 }, Text({ content: t`${fg(C.green)(m.resolvedTitle.substring(0, 50))}` }))
+      scanBox.add(Box({ flexDirection: "row", gap: 2, width: 60, height: 1 },
+        Box({ width: 12 }, Text({ content: t`${fg(C.green)(m.sizeHuman.padStart(10))}` })),
+        Box({ flexGrow: 1 }, Text({ content: t`${fg(C.text)(m.resolvedTitle.substring(0, 45))}` }))
       ))
+    }
+    out.push(scanBox)
+    if (movies.length > scanVisible) {
+      out.push(Box({ width: "100%", alignItems: "center", marginTop: 0 }, Text({ content: t`${fg(C.dim)(`... and ${movies.length - scanVisible} more`)}` })))
     }
     out.push(Box({ width: "100%", alignItems: "center", marginTop: 1 }, Text({ content: t`${bold(fg(C.accent)("Press ENTER to proceed."))}` })))
   } else {
@@ -359,22 +367,38 @@ function renderScan(): any[] {
 
 // ── Review View ────────────────────────────────────────────────────────────
 function renderReview(): any[] {
-  const out: any[] = [Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 1 }, Text({ content: t`${bold(fg(C.text)("Step 2: Review"))}` }), Text({ content: t`${fg(C.dim)("F/M/E/Y cycle/edit")}` }))]
-  const reviewVisible = 4; const start = Math.max(0, sel - reviewVisible + 1); const slice = movies.slice(start, start + reviewVisible)
+  const out: any[] = [
+    Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 1 }, 
+      Text({ content: t`${bold(fg(C.text)("Step 2: Review & Edit"))}` }), 
+      Text({ content: t`${fg(C.dim)("[F]mt [M]ode [E]dit [Y]ear")}` })
+    )
+  ]
+  
+  const reviewVisible = 6
+  const start = Math.max(0, Math.min(sel - Math.floor(reviewVisible / 2), movies.length - reviewVisible))
+  const slice = movies.slice(start, start + reviewVisible)
+  
+  const listBox = Box({ flexDirection: "column", width: "100%", marginBottom: 1 })
   for (let i = 0; i < slice.length; i++) {
     const m = slice[i]; const actualIdx = start + i; const isSel = actualIdx === sel; const rc = isSel ? C.accent : C.text;
     const modeLabels: Record<string, string> = { "keep_both": "Both", "mp4_only": "MP4", "mkv_only": "MKV" }
     
-    out.push(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 2, width: "100%" },
+    listBox.add(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
       Box({ width: 4 }, Text({ content: t`${fg(rc)((isSel ? "\u25B8" : " ") + (actualIdx + 1).toString())}` })),
-      Box({ width: 8 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.slice(0, 3)}]`)}` })),
-      Box({ width: 8 }, Text({ content: t`${fg(rc)(`(${modeLabels[m.conversionMode]})`)}` })),
+      Box({ width: 14 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
+      Box({ width: 10 }, Text({ content: t`${fg(rc)(`(${modeLabels[m.conversionMode]})`)}` })),
       Box({ flexGrow: 1 }, Text({ content: t`${fg(rc)(m.resolvedTitle.substring(0, 40))}` }))
     ))
   }
+  out.push(listBox)
+
   if (movies[sel]) {
-    out.push(Box({ flexDirection: "column", borderStyle: "rounded", borderColor: C.border, padding: 0, width: "100%", backgroundColor: "#0d1117", marginTop: 0 },
-      Text({ content: t`${bold(fg(C.accent)(` Preview: ${movies[sel].resolvedTitle}`.substring(0, 78)))}` })))
+    const m = movies[sel]
+    out.push(Box({ flexDirection: "column", borderStyle: "rounded", borderColor: C.accent, paddingLeft: 2, paddingRight: 2, width: "100%", backgroundColor: "#0d1117" },
+      Text({ content: t`${bold(fg(C.accent)(` PREVIEW: ${m.resolvedTitle}${m.resolvedYear ? ` (${m.resolvedYear})` : ""}`))}` }),
+      Text({ content: t`${fg(C.dim)(` Path: .../${m.originalName.substring(m.originalName.length - 40)}`)}` }),
+      Text({ content: t`${fg(C.dim)(` Settings: ${m.confirmedFormat} | ${m.conversionMode} | ${m.sizeHuman}`)}` })
+    ))
   }
   return out
 }
@@ -382,18 +406,41 @@ function renderReview(): any[] {
 // ── Progress View ──────────────────────────────────────────────────────────
 function renderProgress(): any[] {
   const out: any[] = [Box({ width: "100%", alignItems: "center", marginBottom: 1 }, Text({ content: t`${bold(fg(C.text)("Step 3: Processing"))}` }))]
-  for (const m of movies.slice(0, 8)) {
+  const progressVisible = 6
+  const start = Math.max(0, Math.min(Math.max(0, procIdx - 2), Math.max(0, movies.length - progressVisible)))
+  
+  const listBox = Box({ flexDirection: "column", width: "100%", marginBottom: 1 })
+  for (const m of movies.slice(start, start + progressVisible)) {
     let icon = "\u25CB", color = C.dim
     if (m.status === "converting") { icon = "\u25C9"; color = C.yellow }
     else if (m.status === "done") { icon = "\u2713"; color = C.green }
     else if (m.status === "error") { icon = "\u2717"; color = C.red }
-    const bar = m.status === "converting" && procIdx === movies.indexOf(m) ? ` ${Math.round(procPct)}%` : ""
+    else if (m.status === "ready") { icon = "\u25CF"; color = C.accent }
     
-    out.push(Box({ flexDirection: "row", gap: 1, paddingLeft: 2, width: "100%" }, 
+    listBox.add(Box({ flexDirection: "row", gap: 2, paddingLeft: 4, paddingRight: 4, width: "100%", height: 1 }, 
       Box({ width: 2 }, Text({ content: t`${fg(color)(icon)}` })),
       Box({ flexGrow: 1 }, Text({ content: t`${fg(color)(m.resolvedTitle.substring(0, 50))}` })),
-      Box({ width: 10 }, Text({ content: t`${fg(color)(bar)}` }))
+      Box({ width: 12 }, Text({ content: t`${fg(color)(m.status.toUpperCase())}` }))
     ))
+  }
+  out.push(listBox)
+
+  if (isProcessing && procIdx >= 0) {
+    const m = movies[procIdx]
+    const width = 40
+    const filled = Math.round((procPct / 100) * width)
+    const bar = "\u2588".repeat(filled) + "\u2591".repeat(width - filled)
+    
+    out.push(Box({ flexDirection: "column", alignItems: "center", width: "100%", marginTop: 1 },
+      Text({ content: t`${bold(fg(C.yellow)(`Processing: ${m.resolvedTitle}`))}` }),
+      Box({ width: width + 10, flexDirection: "row", justifyContent: "center", marginTop: 1 },
+        Text({ content: t`${fg(C.accent)(bar)} ${fg(C.text)(Math.round(procPct) + "%")}` })
+      )
+    ))
+  } else if (!isProcessing && status === "All done!") {
+    out.push(Box({ width: "100%", alignItems: "center", marginTop: 1 }, Text({ content: t`${bold(fg(C.green)("All processing tasks completed!"))}` })))
+  } else if (!isProcessing) {
+    out.push(Box({ width: "100%", alignItems: "center", marginTop: 1 }, Text({ content: t`${bold(fg(C.accent)("Press ENTER to start processing."))}` })))
   }
   return out
 }
@@ -467,7 +514,7 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
     if (key === "m") { if (movies[sel]) { const MODES = ["keep_both", "mp4_only", "mkv_only"] as const; const idx = MODES.indexOf(movies[sel].conversionMode as any); movies[sel].conversionMode = MODES[(idx + 1) % 3]; render() }; return }
     if (key === "e") { if (movies[sel]) { editIdx = sel; editType = "title"; editVal = movies[sel].resolvedTitle; render() }; return }
     if (key === "y") { if (movies[sel]) { editIdx = sel; editType = "year"; editVal = movies[sel].resolvedYear; render() }; return }
-    if (key === "return") { for (const m of movies) if (m.status === "title-resolved" || m.status === "pending") m.status = "ready"; flowStep = "progress"; setView("progress"); return }
+    if (key === "return") { for (const m of movies) if (m.status === "title-resolved" || m.status === "pending" || m.status === "error") m.status = "ready"; flowStep = "progress"; setView("progress"); return }
     if (key === "escape") { flowStep = "scan"; setView("scan"); return }
   }
   if (view === "progress" && key === "return") {
