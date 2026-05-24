@@ -210,13 +210,16 @@ function render() {
               paddingLeft: 2,
               paddingRight: 2,
               paddingTop: 1,
-              paddingBottom: 1,
+              paddingBottom: 1, 
               flexGrow: 1
             },
             ...[
-              error ? Box({ paddingLeft: 1, marginBottom: 1, width: "100%" }, Text({ content: t`${fg(C.red)(("\u2717 " + error).substring(0, 70))}` })) : null,
-              status && !isProcessing ? Box({ paddingLeft: 1, marginBottom: 1, width: "100%" }, Text({ content: t`${fg(C.green)(("\u25CF " + status).substring(0, 70))}` })) : null,
-              ...mainContent
+              ...mainContent,
+              Box({ flexGrow: 1 }), // Push status towards bottom
+              Box({ width: "100%", height: 1, flexDirection: "row", justifyContent: "flex-end", paddingRight: 2, marginBottom: 0 },
+                error ? Text({ content: t`${fg(C.red)(("\u2717 " + error).substring(0, 60))}` }) :
+                status && !isProcessing ? Text({ content: t`${fg(C.green)(("\u25CF " + status).substring(0, 60))}` }) : null
+              )
             ].filter(Boolean)
           )
         )
@@ -287,7 +290,7 @@ function renderInit(): any[] {
 
 // ── Settings View ──────────────────────────────────────────────────────────
 function renderSettings(): any[] {
-  const viewportSize = 12 
+  const viewportSize = 11 
   const out: any[] = [
     Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 1, backgroundColor: C.panel },
       Text({ content: t`${bold(fg(C.text)("Settings"))}` }),
@@ -346,15 +349,29 @@ function renderScan(): any[] {
   const out: any[] = [Box({ width: "100%", alignItems: "center", marginBottom: 1 }, Text({ content: t`${bold(fg(C.text)("Step 1: Scan Source Directory"))}` }))]
   if (movies.length > 0) {
     out.push(Box({ width: "100%", alignItems: "center", marginBottom: 1 }, Text({ content: t`${bold(fg(C.accent)(`Found ${movies.length} files:`))}` })))
-    const scanVisible = 8
-    const scanBox = Box({ flexDirection: "column", width: "100%", alignItems: "center" })
+    
+    // Table Header
+    out.push(Box({ flexDirection: "column", width: "100%", marginTop: 1, marginBottom: 0 },
+      Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
+        Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("SIZE"))}` })),
+        Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
+        Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
+        Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE (PRELIMINARY)"))}` }))
+      ),
+      Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(84))}` }))
+    ))
+
+    const scanVisible = 6
+    const listBox = Box({ flexDirection: "column", width: "100%" })
     for (const m of movies.slice(0, scanVisible)) {
-      scanBox.add(Box({ flexDirection: "row", gap: 2, width: 60, height: 1 },
-        Box({ width: 12 }, Text({ content: t`${fg(C.green)(m.sizeHuman.padStart(10))}` })),
-        Box({ flexGrow: 1 }, Text({ content: t`${fg(C.text)(m.resolvedTitle.substring(0, 45))}` }))
+      listBox.add(Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
+        Box({ width: 14, height: 1 }, Text({ content: t`${fg(C.green)(m.sizeHuman)}` })),
+        Box({ width: 14, height: 1 }, Text({ content: t`${fg(C.dim)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
+        Box({ width: 8, height: 1 }, Text({ content: t`${fg(C.dim)(m.resolvedYear || "----")}` })),
+        Box({ flexGrow: 1, height: 1 }, Text({ content: t`${fg(C.text)(m.resolvedTitle.substring(0, 45))}` }))
       ))
     }
-    out.push(scanBox)
+    out.push(listBox)
     if (movies.length > scanVisible) {
       out.push(Box({ width: "100%", alignItems: "center", marginTop: 0 }, Text({ content: t`${fg(C.dim)(`... and ${movies.length - scanVisible} more`)}` })))
     }
@@ -367,22 +384,25 @@ function renderScan(): any[] {
 // ── Review View ────────────────────────────────────────────────────────────
 function renderReview(): any[] {
   const out: any[] = [
-    Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 1 }, 
+    Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 0 }, 
       Text({ content: t`${bold(fg(C.text)("Step 2: Review & Edit"))}` }), 
       Text({ content: t`${fg(C.dim)("[F]mt [M]ode [E]dit [Y]ear")}` })
     )
   ]
   
   // Table Header
-  out.push(Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1, borderStyle: "single", borderColor: C.border, marginBottom: 0 },
-    Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("#"))}` })),
-    Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
-    Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
-    Box({ width: 10 }, Text({ content: t`${bold(fg(C.dim)("MODE"))}` })),
-    Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
+  out.push(Box({ flexDirection: "column", width: "100%", marginTop: 1, marginBottom: 0 },
+    Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
+      Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("#"))}` })),
+      Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
+      Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
+      Box({ width: 10 }, Text({ content: t`${bold(fg(C.dim)("MODE"))}` })),
+      Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
+    ),
+    Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(84))}` }))
   ))
 
-  const reviewVisible = 6
+  const reviewVisible = 5
   const start = Math.max(0, Math.min(sel - Math.floor(reviewVisible / 2), movies.length - reviewVisible))
   const slice = movies.slice(start, start + reviewVisible)
   
@@ -414,14 +434,18 @@ function renderReview(): any[] {
 
 // ── Progress View ──────────────────────────────────────────────────────────
 function renderProgress(): any[] {
-  const out: any[] = [Box({ width: "100%", alignItems: "center", marginBottom: 1 }, Text({ content: t`${bold(fg(C.text)("Step 3: Processing"))}` }))]
+  const out: any[] = [Box({ width: "100%", alignItems: "center", marginBottom: 0 }, Text({ content: t`${bold(fg(C.text)("Step 3: Processing"))}` }))]
   
   // Table Header
-  out.push(Box({ flexDirection: "row", paddingLeft: 4, paddingRight: 4, width: "100%", height: 1, borderStyle: "single", borderColor: C.border, marginBottom: 0 },
-    Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("!"))}` })),
-    Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("STATUS"))}` })),
-    Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
-    Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
+  out.push(Box({ flexDirection: "column", width: "100%", marginTop: 1, marginBottom: 0 },
+    Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
+      Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("!"))}` })),
+      Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("STATUS"))}` })),
+      Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
+      Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
+      Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
+    ),
+    Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(84))}` }))
   ))
 
   const progressVisible = 6
@@ -435,10 +459,11 @@ function renderProgress(): any[] {
     else if (m.status === "error") { icon = "\u2717"; color = C.red }
     else if (m.status === "ready") { icon = "\u25CF"; color = C.accent }
     
-    listBox.add(Box({ flexDirection: "row", gap: 2, paddingLeft: 4, paddingRight: 4, width: "100%", height: 1 }, 
-      Box({ width: 2 }, Text({ content: t`${fg(color)(icon)}` })),
+    listBox.add(Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 }, 
+      Box({ width: 4 }, Text({ content: t`${fg(color)(icon)}` })),
       Box({ width: 14 }, Text({ content: t`${fg(color)(m.status.toUpperCase())}` })),
       Box({ width: 14 }, Text({ content: t`${fg(color)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
+      Box({ width: 8 }, Text({ content: t`${fg(color)(m.resolvedYear || "----")}` })),
       Box({ flexGrow: 1 }, Text({ content: t`${fg(color)(m.resolvedTitle.substring(0, 40))}` }))
     ))
   }
@@ -450,9 +475,9 @@ function renderProgress(): any[] {
     const filled = Math.round((procPct / 100) * width)
     const bar = "\u2588".repeat(filled) + "\u2591".repeat(width - filled)
     
-    out.push(Box({ flexDirection: "column", alignItems: "center", width: "100%", marginTop: 1 },
+    out.push(Box({ flexDirection: "column", alignItems: "center", width: "100%", marginTop: 0 },
       Text({ content: t`${bold(fg(C.yellow)(`Processing: ${m.resolvedTitle}`))}` }),
-      Box({ width: width + 10, flexDirection: "row", justifyContent: "center", marginTop: 1 },
+      Box({ width: width + 10, flexDirection: "row", justifyContent: "center", marginTop: 0 },
         Text({ content: t`${fg(C.accent)(bar)} ${fg(C.text)(Math.round(procPct) + "%")}` })
       )
     ))
