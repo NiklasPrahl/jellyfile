@@ -40,7 +40,7 @@ const SETTINGS_GROUPS = [
   {
     label: "LLM (AI Title Resolution)",
     items: [
-      { key: "llmProvider" as const, label: "Provider (gemini/groq/ollama)", secret: false },
+      { key: "llmProvider" as const, label: "AI Provider", secret: false },
       { key: "geminiApiKey" as const, label: "Gemini API Key", secret: true },
       { key: "groqApiKey" as const, label: "Groq API Key", secret: true },
       { key: "ollamaBaseUrl" as const, label: "Ollama Base URL", secret: false },
@@ -209,8 +209,8 @@ function render() {
               flexGrow: 1
             },
             ...[
-              error ? Box({ paddingLeft: 1, marginBottom: 0 }, Text({ content: t`${fg(C.red)(("\u2717 " + error).substring(0, 80))}` })) : null,
-              status && !isProcessing ? Box({ paddingLeft: 1, marginBottom: 0 }, Text({ content: t`${fg(C.green)(("\u25CF " + status).substring(0, 80))}` })) : null,
+              error ? Box({ paddingLeft: 1, marginBottom: 0, width: "100%" }, Text({ content: t`${fg(C.red)(("\u2717 " + error).substring(0, 70))}` })) : null,
+              status && !isProcessing ? Box({ paddingLeft: 1, marginBottom: 0, width: "100%" }, Text({ content: t`${fg(C.green)(("\u25CF " + status).substring(0, 70))}` })) : null,
               ...mainContent
             ].filter(Boolean)
           )
@@ -258,20 +258,23 @@ function renderInit(): any[] {
   const initItems = [{ key: "sourceDir" as const, label: "Input Directory" }, { key: "outputDir" as const, label: "Output Directory" }]
   for (let i = 0; i < initItems.length; i++) {
     const item = initItems[i]; const isSel = i === sel; const val = (config as any)[item.key]
-    const labelStr = (isSel ? "\u25B8 " : "  ") + item.label + ": "
+    const prefixStr = isSel ? "> " : "  "
+    const color = isSel ? C.accent : C.text
     
     if (editIdx === i && editType === "setting") {
-      out.push(Box({ flexDirection: "row", backgroundColor: "#252b37", width: "100%", paddingLeft: 2 },
-        Text({ content: t`${fg(C.accent)(labelStr)}${fg(C.green)((editVal + "\u2588").padEnd(60))}` })
+      out.push(Box({ flexDirection: "row", backgroundColor: "#252b37", width: "100%", paddingLeft: 2, height: 1 },
+        Box({ width: 24 }, Text({ content: t`${fg(C.accent)(prefixStr + item.label + ":")}` })),
+        Box({ flexGrow: 1 }, Text({ content: t`${fg(C.green)((editVal + "_").substring(0, 50))}` }))
       ))
     } else {
-      out.push(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, width: "100%", paddingLeft: 2 },
-        Text({ content: t`${fg(isSel ? C.accent : C.text)(labelStr)}${fg(C.dim)((val || "(not set)").padEnd(60))}` })
+      out.push(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : C.panel, width: "100%", paddingLeft: 2, height: 1 },
+        Box({ width: 24 }, Text({ content: t`${fg(isSel ? C.accent : C.text)(prefixStr + item.label + ":")}` })),
+        Box({ flexGrow: 1 }, Text({ content: t`${fg(C.dim)((val || "(not set)").substring(0, 50))}` }))
       ))
     }
   }
-  out.push(Box({ width: "100%", height: 3 }))
-  out.push(Box({ width: "100%", height: 3, justifyContent: "center", alignItems: "center", borderStyle: "double", borderColor: sel === 2 ? C.accent : C.border, backgroundColor: sel === 2 ? "#252b37" : undefined },
+  out.push(Box({ width: "100%", height: 3, backgroundColor: C.panel }))
+  out.push(Box({ width: "100%", height: 3, justifyContent: "center", alignItems: "center", borderStyle: "double", borderColor: sel === 2 ? C.accent : C.border, backgroundColor: sel === 2 ? "#252b37" : C.panel },
     Text({ content: t`${sel === 2 ? bold(fg(C.accent)(">>> START SCAN <<<")) : fg(C.dim)("START SCAN")}` })
   ))
   return out
@@ -281,9 +284,9 @@ function renderInit(): any[] {
 function renderSettings(): any[] {
   const viewportSize = 12 
   const out: any[] = [
-    Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 1 },
+    Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 1, backgroundColor: C.panel },
       Text({ content: t`${bold(fg(C.text)("Settings"))}` }),
-      Text({ content: t`${fg(C.dim)("Arrows to scroll")}` }),
+      Text({ content: t`${fg(C.dim)("Arrows to scroll | Enter to edit")}` }),
     ),
   ]
 
@@ -291,9 +294,8 @@ function renderSettings(): any[] {
   const rowToItemMap: (number | null)[] = []
   
   for (const group of SETTINGS_GROUPS) {
-    const groupHeader = group.label.toUpperCase().padEnd(70)
-    rows.push(Box({ width: "100%", paddingLeft: 1 }, 
-      Text({ content: t`${bold(fg(C.accent)(groupHeader))}` })
+    rows.push(Box({ width: "100%", backgroundColor: C.border, paddingLeft: 1, marginBottom: 0, height: 1 }, 
+      Text({ content: t`${bold(fg(C.accent)(" " + group.label.toUpperCase()))}` })
     ))
     rowToItemMap.push(null)
     
@@ -301,24 +303,25 @@ function renderSettings(): any[] {
       const currentAbs = ALL_SETTINGS.indexOf(s)
       const isSel = currentAbs === sel
       const val = (config as any)[s.key]
-      const disp = (s.secret && val ? "\u25CF".repeat(Math.min(val.length, 16)) : val || "(not set)")
+      const disp = (s.secret && val ? "*".repeat(Math.min(val.length, 16)) : val || "(not set)")
       
-      const labelStr = s.label.padEnd(24)
-      const prefixStr = isSel ? "\u25B8 " : "  "
+      const prefixStr = isSel ? "> " : "  "
       const color = isSel ? C.accent : C.text
 
       if (editIdx === currentAbs && editType === "setting") {
-        rows.push(Box({ flexDirection: "row", width: "100%", backgroundColor: "#252b37", paddingLeft: 2 },
-          Text({ content: t`${fg(C.accent)(prefixStr + labelStr + ": ")}${fg(C.green)((editVal + "\u2588").padEnd(50))}` })
+        rows.push(Box({ flexDirection: "row", width: "100%", backgroundColor: "#252b37", paddingLeft: 1, height: 1 },
+          Box({ width: 28 }, Text({ content: t`${fg(C.accent)(prefixStr + s.label + ":")}` })),
+          Box({ flexGrow: 1 }, Text({ content: t`${fg(C.green)((editVal + "_").substring(0, 45))}` }))
         ))
       } else {
-        rows.push(Box({ flexDirection: "row", width: "100%", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 2 },
-          Text({ content: t`${fg(color)(prefixStr + labelStr + ": ")}${fg(C.dim)(disp.padEnd(50))}` })
+        rows.push(Box({ flexDirection: "row", width: "100%", backgroundColor: isSel ? "#252b37" : C.panel, paddingLeft: 1, height: 1 },
+          Box({ width: 28 }, Text({ content: t`${fg(color)(prefixStr + s.label + ":")}` })),
+          Box({ flexGrow: 1 }, Text({ content: t`${fg(C.dim)(disp.substring(0, 45))}` }))
         ))
       }
       rowToItemMap.push(currentAbs)
     }
-    rows.push(Box({ width: "100%", height: 1 }, Text({ content: "".padEnd(70) })))
+    rows.push(Box({ width: "100%", height: 1, backgroundColor: C.panel }, Text({ content: " " })))
     rowToItemMap.push(null)
   }
 
@@ -340,9 +343,9 @@ function renderScan(): any[] {
     out.push(Text({ content: t`${bold(fg(C.accent)(`Found ${movies.length} files:`))}` }))
     const scanVisible = 6
     for (const m of movies.slice(0, scanVisible)) {
-      const line = `${m.sizeHuman.padStart(8)}  ${m.resolvedTitle.slice(0, 40)}`.padEnd(70)
-      out.push(Box({ flexDirection: "row", gap: 2, paddingLeft: 2 },
-        Text({ content: t`${fg(C.green)(line)}` }),
+      out.push(Box({ flexDirection: "row", gap: 2, paddingLeft: 2, width: "100%" },
+        Box({ width: 10 }, Text({ content: t`${fg(C.green)(m.sizeHuman.padStart(8))}` })),
+        Box({ flexGrow: 1 }, Text({ content: t`${fg(C.green)(m.resolvedTitle.substring(0, 50))}` }))
       ))
     }
     out.push(Box({ width: "100%", alignItems: "center", marginTop: 1 }, Text({ content: t`${bold(fg(C.accent)("Press ENTER to proceed."))}` })))
@@ -359,15 +362,17 @@ function renderReview(): any[] {
   for (let i = 0; i < slice.length; i++) {
     const m = slice[i]; const actualIdx = start + i; const isSel = actualIdx === sel; const rc = isSel ? C.accent : C.text;
     const modeLabels: Record<string, string> = { "keep_both": "Both", "mp4_only": "MP4", "mkv_only": "MKV" }
-    const line = `${(isSel ? "\u25B8" : " ") + (actualIdx + 1).toString().padEnd(3)} [${m.confirmedFormat.slice(0, 3)}] (${modeLabels[m.conversionMode].padEnd(4)}) ${m.resolvedTitle.slice(0, 30)}`.padEnd(70)
-    out.push(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 2 },
-      Text({ content: t`${fg(rc)(line)}` }),
+    
+    out.push(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 2, width: "100%" },
+      Box({ width: 4 }, Text({ content: t`${fg(rc)((isSel ? "\u25B8" : " ") + (actualIdx + 1).toString())}` })),
+      Box({ width: 8 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.slice(0, 3)}]`)}` })),
+      Box({ width: 8 }, Text({ content: t`${fg(rc)(`(${modeLabels[m.conversionMode]})`)}` })),
+      Box({ flexGrow: 1 }, Text({ content: t`${fg(rc)(m.resolvedTitle.substring(0, 40))}` }))
     ))
   }
   if (movies[sel]) {
-    const previewStr = ` Preview: ${movies[sel].resolvedTitle}`.padEnd(80)
     out.push(Box({ flexDirection: "column", borderStyle: "rounded", borderColor: C.border, padding: 0, width: "100%", backgroundColor: "#0d1117", marginTop: 0 },
-      Text({ content: t`${bold(fg(C.accent)(previewStr))}` })))
+      Text({ content: t`${bold(fg(C.accent)(` Preview: ${movies[sel].resolvedTitle}`.substring(0, 78)))}` })))
   }
   return out
 }
@@ -381,8 +386,12 @@ function renderProgress(): any[] {
     else if (m.status === "done") { icon = "\u2713"; color = C.green }
     else if (m.status === "error") { icon = "\u2717"; color = C.red }
     const bar = m.status === "converting" && procIdx === movies.indexOf(m) ? ` ${Math.round(procPct)}%` : ""
-    const line = `${icon} ${m.resolvedTitle.slice(0, 35)}${bar}`.padEnd(70)
-    out.push(Box({ flexDirection: "row", gap: 1, paddingLeft: 2 }, Text({ content: t`${fg(color)(line)}` })))
+    
+    out.push(Box({ flexDirection: "row", gap: 1, paddingLeft: 2, width: "100%" }, 
+      Box({ width: 2 }, Text({ content: t`${fg(color)(icon)}` })),
+      Box({ flexGrow: 1 }, Text({ content: t`${fg(color)(m.resolvedTitle.substring(0, 50))}` })),
+      Box({ width: 10 }, Text({ content: t`${fg(color)(bar)}` }))
+    ))
   }
   return out
 }
@@ -425,7 +434,20 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
     else { editIdx = sel; editType = "setting"; editVal = (config as any)[sel === 0 ? "sourceDir" : "outputDir"]; render() }
     return
   }
-  if (view === "settings" && key === "return") { editIdx = sel; editType = "setting"; editVal = (config as any)[ALL_SETTINGS[sel].key]; render(); return }
+  if (view === "settings" && key === "return") {
+    const setting = ALL_SETTINGS[sel]
+    if (setting.key === "llmProvider") {
+      const providers = ["gemini", "groq", "ollama"] as const
+      const current = config.llmProvider as any
+      const nextIdx = (providers.indexOf(current) + 1) % providers.length
+      config.llmProvider = providers[nextIdx] as any
+      saveConfig(config)
+      status = `Provider: ${config.llmProvider}`
+      render()
+      return
+    }
+    editIdx = sel; editType = "setting"; editVal = (config as any)[ALL_SETTINGS[sel].key]; render(); return
+  }
   if (view === "scan" && key === "return") {
     if (movies.length > 0) { flowStep = "review"; setView("review"); return }
     status = "Scanning..."; render()
