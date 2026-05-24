@@ -1,45 +1,75 @@
-# JELLYFILE - Movie Disc Digitization Pipeline TUI
 
-Built with OpenTUI (https://opentui.com).
+```text
+      ██╗███████╗██╗     ██╗    ██╗   ██╗███████╗██╗██╗     ███████╗
+      ██║██╔════╝██║     ██║    ╚██╗ ██╔╝██╔════╝██║██║     ██╔════╝
+      ██║█████╗  ██║     ██║     ╚████╔╝ █████╗  ██║██║     ███╗  
+██╗   ██║██╔══╝  ██║     ██║      ╚██╔╝  ██╔══╝  ██║██║     ██╔══╝  
+╚██████╔╝███████╗███████╗███████╗  ██║   ██║     ██║███████╗███████╗
+ ╚═════╝ ╚══════╝╚══════╝╚══════╝  ╚═╝   ╚═╝     ╚═╝╚══════╝╚══════╝
+```
 
-MakeMKV output -> Title Resolution -> Format Tagging -> HandBrake Conversion -> Subtitle Download -> Movie Library
+# Jellyfile
+
+A specialized TUI-based pipeline for automated movie disc digitization and organization.
+
+---
 
 ## Features
-- Scan MakeMKV output folders for MKV files
-- AI Title Resolution via Multi-Provider LLM (Gemini, Groq, Ollama)
-- Auto-detect media format (DVD / Blu-ray / 4K) via resolution metadata
-- HandBrake conversion MKV to MP4 with per-format presets
-- Subtitle extraction from MKV + download (EN + DE) via OpenSubtitles
-- Media-compatible output structure
-- Settings panel for all API keys and paths
+- **Automated Scanning**: Detects and scans movie disc directories.
+- **AI-Powered Metadata**: Uses Gemini, Groq, or Ollama to resolve titles and release years automatically.
+- **HandBrake Integration**: Fully automated conversion pipeline for DVD, Blu-ray, and 4K media.
+- **Subtitle Support**: Automated subtitle extraction and OpenSubtitles integration.
+- **Customizable Organization**: Define your own folder and file naming structures.
 
-## Output Structure
-    Film Title (2024)/
-      Film Title (2024) - [Blu-ray].mp4
-      Film Title (2024) - [Blu-ray].mkv      (optional)
-      Film Title (2024) - [Blu-ray].en.srt
-      Film Title (2024) - [Blu-ray].de.srt
+---
 
-## Prerequisites
-- Bun (https://bun.sh, v1.0+)
-- HandBrakeCLI (https://handbrake.fr/downloads2.php)
-- MKVToolNix (mkvmerge, mkvextract)
+## Setup Instructions
 
-## Setup
-    cd jellyfile
-    bun install
-    cp .env.example .env
-    # Edit .env with your API keys
-    bun run start
+### Prerequisites
+- [Bun](https://bun.sh/) (required for runtime)
+- HandBrakeCLI, mkvmerge, and mkvextract installed on your system.
 
-## TUI Controls
-S=Settings  Up/Down=Navigate  Enter=Execute  Esc=Cancel/Back  Q=Quit
-F=Cycle format  M=Cycle conversion mode  E=Edit Title  Y=Edit Year
+### Installation
 
-## Workflow
-1. Initial Setup - Confirm input/output directories
-2. Scan - Resolve titles via LLM
-3. Review - Adjust formats, modes, and verify titles
-4. Process - HandBrake + subtitles + organization
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/jellyfile.git
+   cd jellyfile
+   ```
 
-All interactive decisions happen BEFORE conversion so processing runs unattended.
+2. **Install dependencies:**
+   ```bash
+   bun install
+   ```
+
+3. **Configure the application:**
+   Copy the example environment file and fill in your settings:
+   ```bash
+   cp .env.example .env
+   # Edit .env and configure your paths and API keys
+   ```
+
+4. **Run the application:**
+   ```bash
+   bun run src/index.tsx
+   ```
+
+---
+
+## Usage
+
+- **Navigation**: Use Up/Down arrow keys.
+- **Settings**: Press `S` to access the settings panel.
+- **Execution**: Press `Enter` to start scans or proceed through steps.
+- **Quit**: Press `Q` at any time.
+
+---
+
+## Customization
+
+The application allows full control over your media organization patterns via the **Settings** menu:
+
+- **Folder Pattern**: e.g., `{title} ({year})`
+- **File Pattern**: e.g., `{title} ({year}) - [{format}]`
+
+Supported tags: `{title}`, `{year}`, `{format}`.
