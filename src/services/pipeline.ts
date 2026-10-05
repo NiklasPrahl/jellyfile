@@ -5,7 +5,7 @@ import { convertToMp4 } from "./handbrake"
 import { downloadSubtitles, extractSubtitles } from "./subtitles"
 import { organizeMovie, plexName } from "./organizer"
 
-function logError(error: any, context: string) {
+export function logError(error: any, context: string) {
   const logPath = join(process.cwd(), "pipeline_error.log")
   const timestamp = new Date().toISOString()
   const message = error instanceof Error ? error.message : String(error)

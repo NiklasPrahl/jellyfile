@@ -1,6 +1,7 @@
 import type { MovieFile, AppConfig } from "../types"
+import { logError } from "./pipeline"
 
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 const PROMPT_TEMPLATE = (fileList: string) => `Du bist ein Experte für Filmdatenbanken. Ich gebe dir eine Liste von Videodateien mit ihren Dateigrößen. Für jede Datei:
@@ -33,14 +34,20 @@ async function callGemini(pending: MovieFile[], apiKey: string) {
       contents: [{ parts: [{ text: PROMPT_TEMPLATE(fileList) }] }],
       generationConfig: { 
         temperature: 0.1, 
-        maxOutputTokens: 2048,
+        maxOutputTokens: 8192,
         responseMimeType: "application/json" 
       },
     }),
   })
   if (!res.ok) throw new Error(`Gemini API ${res.status}: ${await res.text()}`)
   const data = await res.json() as any
-  return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]")
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]"
+  try {
+    return JSON.parse(text)
+  } catch (err) {
+    const snippet = text.substring(0, 150) + (text.length > 150 ? "..." : "")
+    throw new Error(`JSON Parse Error: ${err instanceof Error ? err.message : String(err)} (Raw Response: ${snippet})`)
+  }
 }
 
 async function callGroq(pending: MovieFile[], apiKey: string) {
@@ -62,7 +69,14 @@ async function callGroq(pending: MovieFile[], apiKey: string) {
   const data = await res.json() as any
   const content = data.choices?.[0]?.message?.content || "{}"
   
-  let parsed = JSON.parse(content)
+  let parsed: any
+  try {
+    parsed = JSON.parse(content)
+  } catch (err) {
+    const snippet = content.substring(0, 150) + (content.length > 150 ? "..." : "")
+    throw new Error(`JSON Parse Error: ${err instanceof Error ? err.message : String(err)} (Raw Response: ${snippet})`)
+  }
+
   // If Groq returns { "movies": [...] } or similar, extract the array
   if (!Array.isArray(parsed)) {
     const key = Object.keys(parsed).find(k => Array.isArray(parsed[k]))
@@ -87,7 +101,15 @@ async function callOllama(pending: MovieFile[], baseUrl: string, model: string) 
   })
   if (!res.ok) throw new Error(`Ollama API ${res.status}: ${await res.text()}`)
   const data = await res.json() as any
-  let parsed = JSON.parse(data.response || "[]")
+  const responseText = data.response || "[]"
+  
+  let parsed: any
+  try {
+    parsed = JSON.parse(responseText)
+  } catch (err) {
+    const snippet = responseText.substring(0, 150) + (responseText.length > 150 ? "..." : "")
+    throw new Error(`JSON Parse Error: ${err instanceof Error ? err.message : String(err)} (Raw Response: ${snippet})`)
+  }
   
   if (!Array.isArray(parsed)) {
     const key = Object.keys(parsed).find(k => Array.isArray(parsed[k]))
@@ -106,16 +128,26 @@ export async function resolveTitles(
   if (!pending.length) return
 
   try {
-    let results: any[] = []
+    const results: any[] = []
     
-    if (config.llmProvider === "gemini") {
-      if (!config.geminiApiKey) throw new Error("Gemini API Key missing")
-      results = await callGemini(pending, config.geminiApiKey)
-    } else if (config.llmProvider === "groq") {
-      if (!config.groqApiKey) throw new Error("Groq API Key missing")
-      results = await callGroq(pending, config.groqApiKey)
-    } else if (config.llmProvider === "ollama") {
-      results = await callOllama(pending, config.ollamaBaseUrl, config.ollamaModel)
+    // Process in chunks of 10 movies to stay within token limits and handle thinking models safely
+    const chunkSize = 10
+    for (let i = 0; i < pending.length; i += chunkSize) {
+      const chunk = pending.slice(i, i + chunkSize)
+      let chunkResults: any[] = []
+      
+      if (config.llmProvider === "gemini") {
+        if (!config.geminiApiKey) throw new Error("Gemini API Key missing")
+        chunkResults = await callGemini(chunk, config.geminiApiKey)
+      } else if (config.llmProvider === "groq") {
+        if (!config.groqApiKey) throw new Error("Groq API Key missing")
+        chunkResults = await callGroq(chunk, config.groqApiKey)
+      } else if (config.llmProvider === "ollama") {
+        chunkResults = await callOllama(chunk, config.ollamaBaseUrl, config.ollamaModel)
+      }
+      
+      results.push(...chunkResults)
+      onProgress?.(Math.min(i + chunk.length, pending.length), pending.length)
     }
 
     for (const res of results) {
@@ -136,11 +168,11 @@ export async function resolveTitles(
     }
 
   } catch (err) {
+    logError(err, "LLM Title Resolution")
     for (const m of pending) {
       m.error = err instanceof Error ? err.message : String(err)
       m.status = "error"
     }
+    throw err
   }
-  
-  onProgress?.(movies.length, movies.length)
 }
