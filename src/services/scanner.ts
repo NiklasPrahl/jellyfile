@@ -17,7 +17,7 @@ function detectFormat(fullPath: string, sizeBytes: number, mkvmergePath: string)
         if (match) {
           const w = parseInt(match[1])
           const h = parseInt(match[2])
-          if (h >= 2160 || w >= 3840) return "Blu-ray_4K"
+          if (h >= 2160 || w >= 3840) return "Blu-ray-4K"
           if (h >= 1080 || w >= 1920) return "Blu-ray"
           return "DVD"
         }
@@ -27,7 +27,7 @@ function detectFormat(fullPath: string, sizeBytes: number, mkvmergePath: string)
 
   // Fallback to size-based detection
   const gb = sizeBytes / GB
-  if (gb > 50) return "Blu-ray_4K"
+  if (gb > 50) return "Blu-ray-4K"
   if (gb >= 12) return "Blu-ray"
   return "DVD"
 }
@@ -50,6 +50,7 @@ export function scanDirectory(dir: string, config: AppConfig): MovieFile[] {
   const movies: MovieFile[] = []
 
   for (const entry of entries) {
+    if (entry.startsWith(".")) continue // skip hidden files such as macOS "._*" resource forks
     const ext = extname(entry).toLowerCase()
     if (ext !== ".mkv" && ext !== ".mp4") continue
 

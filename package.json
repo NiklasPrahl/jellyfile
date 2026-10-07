@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "bun run src/index.tsx",
-    "dev": "bun --watch run src/index.tsx"
+    "dev": "bun --watch run src/index.tsx",
+    "selftest": "bun run scripts/selftest.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.1.0",

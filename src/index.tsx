@@ -5,6 +5,8 @@ import {
 import { loadConfig, saveConfig } from "./config"
 import { scanDirectory } from "./services/scanner"
 import { resolveTitles } from "./services/gemini"
+import { matchTmdb, matchMovie, TMDB_ATTRIBUTION } from "./services/artwork"
+import { sanitizeTitle } from "./services/naming"
 import { runPipeline } from "./services/pipeline"
 import { killActiveHandBrake } from "./services/handbrake"
 import type { MovieFile, AppConfig, AppView, MediaFormat } from "./types"
@@ -27,7 +29,7 @@ let isPasting = false
 let scrollOffset = 0
 
 const VERSION = "0.0.2"
-const FORMATS: MediaFormat[] = ["DVD", "Blu-ray", "Blu-ray_4K"]
+const FORMATS: MediaFormat[] = ["DVD", "Blu-ray", "Blu-ray-4K"]
 
 const SETTINGS_GROUPS = [
   {
@@ -72,6 +74,14 @@ const SETTINGS_GROUPS = [
       { key: "opensubsUsername" as const, label: "OpenSubtitles User", secret: false },
       { key: "opensubsPassword" as const, label: "OpenSubtitles Password", secret: true },
     ]
+  },
+  {
+    label: "Artwork (TMDB)",
+    items: [
+      { key: "tmdbApiKey" as const, label: "TMDB API Key", secret: true },
+      { key: "posterLanguages" as const, label: "Poster Langs (de,en,null)", secret: false },
+      { key: "tmdbIdInFolder" as const, label: "TMDB ID in names (on/off)", secret: false },
+    ]
   }
 ]
 
@@ -99,7 +109,7 @@ const bannerColors = [
 ]
 
 const fmtColor = (f: MediaFormat) =>
-  f === "Blu-ray_4K" ? C.yellow : f === "Blu-ray" ? C.accent : C.dim
+  f === "Blu-ray-4K" ? C.yellow : f === "Blu-ray" ? C.accent : C.dim
 
 const renderer = await createCliRenderer({ 
   exitOnCtrlC: true,
@@ -261,6 +271,7 @@ function renderInit(): any[] {
     Box({ width: "100%", alignItems: "center", marginTop: 0, marginBottom: 1 },
       Text({ content: t`${bold(fg(C.text)("Welcome to Jellyfile!"))}` }),
       Text({ content: t`${fg(C.dim)("Verify your directories to get started.")}` }),
+      ...(config.tmdbApiKey ? [Text({ content: t`${fg(C.dim)(TMDB_ATTRIBUTION)}` })] : []),
     ),
   ]
   const initItems = [{ key: "sourceDir" as const, label: "Input Directory" }, { key: "outputDir" as const, label: "Output Directory" }]
@@ -358,7 +369,7 @@ function renderScan(): any[] {
         Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
         Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE (PRELIMINARY)"))}` }))
       ),
-      Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(84))}` }))
+      Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(Math.max(50, (renderer.width || 80) - 16)))}` }))
     ))
 
     // Explicit Spacer
@@ -373,7 +384,7 @@ function renderScan(): any[] {
       const m = slice[i]; const actualIdx = start + i; const isSel = actualIdx === sel; const rc = isSel ? C.accent : C.text;
       listBox.add(Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
         Box({ width: 14, height: 1 }, Text({ content: t`${fg(isSel ? C.accent : C.green)(m.sizeHuman)}` })),
-        Box({ width: 14, height: 1 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
+        Box({ width: 14, height: 1 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.replace("-4K", " 4K")}]`)}` })),
         Box({ width: 8, height: 1 }, Text({ content: t`${fg(rc)(m.resolvedYear || "----")}` })),
         Box({ flexGrow: 1, height: 1 }, Text({ content: t`${fg(rc)(m.resolvedTitle.substring(0, 45))}` }))
       ))
@@ -391,47 +402,84 @@ function renderScan(): any[] {
 }
 
 // ── Review View ────────────────────────────────────────────────────────────
+function tmdbCell(m: MovieFile, maxLen = 22): { text: string; color: string } {
+  if (m.tmdbId) {
+    const withYear = "\u2713 " + (m.tmdbTitle || "") + (m.tmdbYear ? " (" + m.tmdbYear + ")" : "")
+    if (withYear.length <= maxLen) return { text: withYear, color: C.green }
+    const titleOnly = "\u2713 " + (m.tmdbTitle || "")
+    if (titleOnly.length <= maxLen) return { text: titleOnly, color: C.green }
+    return { text: titleOnly.slice(0, Math.max(1, maxLen - 1)) + "…", color: C.green }
+  }
+  if (m.tmdbChecked) return { text: "\u2717 no match".slice(0, maxLen), color: C.red }
+  return { text: "- not checked".slice(0, maxLen), color: C.dim }
+}
+
 function renderReview(): any[] {
+  const termWidth = renderer.width || 80
+  const rowWidth = Math.max(50, termWidth - 16)
+  const fixedWidth = 4 + 13 + 6 + 8 // 31
+  const avail = rowWidth - fixedWidth
+  const hasTmdb = Boolean(config.tmdbApiKey)
+  const tmdbWidth = hasTmdb ? Math.min(24, Math.max(15, Math.floor(avail * 0.4))) : 0
+  const titleWidth = Math.max(10, avail - tmdbWidth)
+
+  const scrollInfo = movies.length > 6 ? `[${sel + 1}/${movies.length}] ` : ""
   const out: any[] = [
     Box({ flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 0 }, 
       Text({ content: t`${bold(fg(C.text)("Step 2: Review & Edit"))}` }), 
-      Text({ content: t`${fg(C.dim)("[F]mt [M]ode [T]itle [Y]ear")}` })
+      Text({ content: t`${fg(C.dim)(`${scrollInfo}[F]mt [M]ode [T]itle [Y]ear`)}` })
     )
   ]
   
   // Table Header
+  const headerBoxes: any[] = [
+    Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("#"))}` })),
+    Box({ width: 13 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
+    Box({ width: 6 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
+    Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("MODE"))}` })),
+    Box({ width: titleWidth }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` })),
+  ]
+  if (hasTmdb) {
+    headerBoxes.push(Box({ width: tmdbWidth }, Text({ content: t`${bold(fg(C.dim)("TMDB MATCH"))}` })))
+  }
+
   out.push(Box({ flexDirection: "column", width: "100%", marginTop: 1, marginBottom: 0 },
-    Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
-      Box({ width: 4 }, Text({ content: t`${bold(fg(C.dim)("#"))}` })),
-      Box({ width: 14 }, Text({ content: t`${bold(fg(C.dim)("FORMAT"))}` })),
-      Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
-      Box({ width: 10 }, Text({ content: t`${bold(fg(C.dim)("MODE"))}` })),
-      Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
-    ),
-    Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(84))}` }))
+    Box({ flexDirection: "row", paddingLeft: 1, paddingRight: 1, width: "100%", height: 1 }, ...headerBoxes),
+    Box({ width: "100%", height: 1, paddingLeft: 1, paddingRight: 1 }, Text({ content: t`${fg(C.border)("─".repeat(rowWidth))}` }))
   ))
 
   // Explicit Spacer
   out.push(Box({ height: 1 }))
 
-  const reviewVisible = 9
+  const reviewVisible = 6
   const start = Math.max(0, Math.min(sel - Math.floor(reviewVisible / 2), Math.max(0, movies.length - reviewVisible)))
   const slice = movies.slice(start, start + reviewVisible)
-  
+  const modeLabels: Record<string, string> = { "keep_both": "Both", "mp4_only": "MP4", "mkv_only": "MKV" }
+
   const listBox = Box({ flexDirection: "column", width: "100%", marginTop: 0, marginBottom: 0 })
   for (let i = 0; i < slice.length; i++) {
     const m = slice[i]; const actualIdx = start + i; const isSel = actualIdx === sel; const rc = isSel ? C.accent : C.text;
-    const modeLabels: Record<string, string> = { "keep_both": "Both", "mp4_only": "MP4", "mkv_only": "MKV" }
-    
     const isEditingTitle = isSel && editIdx >= 0 && editType === "title"
     const isEditingYear = isSel && editIdx >= 0 && editType === "year"
 
-    listBox.add(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 },
+    const maxTitleLen = hasTmdb ? Math.max(1, titleWidth - 1) : titleWidth
+    const titleDisp = isEditingTitle ? (editVal + "_").slice(0, maxTitleLen) : m.resolvedTitle.slice(0, maxTitleLen)
+    const yearDisp = isEditingYear ? (editVal + "_").slice(0, 5) : (m.resolvedYear || "----")
+
+    const rowBoxes: any[] = [
       Box({ width: 4, height: 1 }, Text({ content: t`${fg(rc)((isSel ? "\u25B8" : " ") + (actualIdx + 1).toString())}` })),
-      Box({ width: 14, height: 1 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
-      Box({ width: 8, height: 1 }, Text({ content: t`${fg(isEditingYear ? C.green : rc)(isEditingYear ? (editVal + "_").substring(0, 7) : (m.resolvedYear || "----"))}` })),
-      Box({ width: 10, height: 1 }, Text({ content: t`${fg(rc)(`(${modeLabels[m.conversionMode]})`)}` })),
-      Box({ flexGrow: 1, height: 1 }, Text({ content: t`${fg(isEditingTitle ? C.green : rc)(isEditingTitle ? (editVal + "_").substring(0, 40) : m.resolvedTitle.substring(0, 40))}` }))
+      Box({ width: 13, height: 1 }, Text({ content: t`${fg(rc)(`[${m.confirmedFormat.replace("-4K", " 4K")}]`)}` })),
+      Box({ width: 6, height: 1 }, Text({ content: t`${fg(isEditingYear ? C.green : rc)(yearDisp)}` })),
+      Box({ width: 8, height: 1 }, Text({ content: t`${fg(rc)(`(${modeLabels[m.conversionMode]})`)}` })),
+      Box({ width: titleWidth, height: 1 }, Text({ content: t`${fg(isEditingTitle ? C.green : rc)(titleDisp)}` })),
+    ]
+    if (hasTmdb) {
+      const cell = tmdbCell(m, tmdbWidth)
+      rowBoxes.push(Box({ width: tmdbWidth, height: 1 }, Text({ content: t`${fg(cell.color)(cell.text)}` })))
+    }
+
+    listBox.add(Box({ flexDirection: "row", backgroundColor: isSel ? "#252b37" : undefined, paddingLeft: 1, paddingRight: 1, width: "100%", height: 1 },
+      ...rowBoxes
     ))
   }
   out.push(listBox)
@@ -451,7 +499,7 @@ function renderProgress(): any[] {
       Box({ width: 8 }, Text({ content: t`${bold(fg(C.dim)("YEAR"))}` })),
       Box({ flexGrow: 1 }, Text({ content: t`${bold(fg(C.dim)("TITLE"))}` }))
     ),
-    Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(84))}` }))
+    Box({ width: "100%", height: 1, paddingLeft: 2, paddingRight: 2 }, Text({ content: t`${fg(C.border)("─".repeat(Math.max(50, (renderer.width || 80) - 16)))}` }))
   ))
 
   // Explicit Spacer
@@ -472,7 +520,7 @@ function renderProgress(): any[] {
     listBox.add(Box({ flexDirection: "row", paddingLeft: 2, paddingRight: 2, width: "100%", height: 1 }, 
       Box({ width: 4, height: 1 }, Text({ content: t`${fg(color)(icon)}` })),
       Box({ width: 14, height: 1 }, Text({ content: t`${fg(color)(m.status.toUpperCase())}` })),
-      Box({ width: 14, height: 1 }, Text({ content: t`${fg(color)(`[${m.confirmedFormat.replace("_4K", " 4K")}]`)}` })),
+      Box({ width: 14, height: 1 }, Text({ content: t`${fg(color)(`[${m.confirmedFormat.replace("-4K", " 4K")}]`)}` })),
       Box({ width: 8, height: 1 }, Text({ content: t`${fg(color)(m.resolvedYear || "----")}` })),
       Box({ flexGrow: 1, height: 1 }, Text({ content: t`${fg(color)(m.resolvedTitle.substring(0, 40))}` }))
     ))
@@ -510,9 +558,20 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
     if (key === "escape") { editIdx = -1; editVal = ""; render(); return }
     if (key === "return") {
       if (view === "review") {
-        if (editType === "title") movies[editIdx].resolvedTitle = editVal
-        else if (editType === "year") movies[editIdx].resolvedYear = editVal
+        const editedIdx = editIdx
+        if (editType === "title") movies[editedIdx].resolvedTitle = sanitizeTitle(editVal)
+        else if (editType === "year") movies[editedIdx].resolvedYear = editVal.trim()
+        const edited = movies[editedIdx]
+        editIdx = -1
+        editVal = ""
+        edited.tmdbChecked = false
+        if (config.tmdbApiKey) {
+          status = "Matching TMDB..."; render()
+          try { await matchMovie(edited, config) } catch (e) { error = e instanceof Error ? e.message : String(e) }
+        }
         status = "Updated!"
+        render()
+        return
       } else {
         const isInit = view === "init"
         const keyToEdit = isInit ? (editIdx === 0 ? "sourceDir" : "outputDir") : ALL_SETTINGS[editIdx].key;
@@ -545,6 +604,13 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
   }
   if (view === "settings" && key === "return") {
     const setting = ALL_SETTINGS[sel]
+    if (setting.key === "tmdbIdInFolder") {
+      config.tmdbIdInFolder = config.tmdbIdInFolder === "on" ? "off" : "on"
+      saveConfig(config)
+      status = `TMDB ID in names: ${config.tmdbIdInFolder}`
+      render()
+      return
+    }
     if (setting.key === "llmProvider") {
       const providers = ["gemini", "groq", "ollama"] as const
       const current = config.llmProvider as any
@@ -565,6 +631,10 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
       if (!movies.length) { error = `No files found!`; render(); return }
       status = `Resolving titles...`; render()
       await resolveTitles(movies, config, (i, n) => { status = `Resolving: ${i}/${n}`; render() })
+      if (config.tmdbApiKey) {
+        status = `Matching TMDB...`; render()
+        await matchTmdb(movies, config, (i, n) => { status = `TMDB: ${i}/${n}`; render() })
+      }
       status = `Scan complete.`; render()
     } catch (e) { error = e instanceof Error ? e.message : String(e); render() }
     return

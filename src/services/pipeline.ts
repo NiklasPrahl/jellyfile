@@ -2,8 +2,10 @@ import { mkdirSync, appendFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import type { MovieFile, AppConfig } from "../types"
 import { convertToMp4 } from "./handbrake"
-import { downloadSubtitles, extractSubtitles } from "./subtitles"
-import { organizeMovie, plexName } from "./organizer"
+import { downloadSubtitles, extractSubtitles, duplicateSubtitles } from "./subtitles"
+import { organizeMovie } from "./organizer"
+import { folderName, fileBase } from "./naming"
+import { downloadPoster, matchMovie } from "./artwork"
 
 export function logError(error: any, context: string) {
   const logPath = join(process.cwd(), "pipeline_error.log")
@@ -31,8 +33,22 @@ export async function runPipeline(
     if (m.status === "error" || m.status === "done") continue
 
     try {
-      const baseName = `${plexName(m, config)} - [${m.confirmedFormat}]`
-      const movieDir = join(config.outputDir, plexName(m, config))
+      // 0. TMDB match (only if not done yet, e.g. title/year was edited in the review step).
+      // The TMDB ID may become part of the folder/file names, so this must happen before naming.
+      if (config.tmdbApiKey && !m.tmdbChecked) {
+        try {
+          await matchMovie(m, config)
+        } catch (e) {
+          m.tmdbChecked = true
+          logError(e, `TMDB match: ${m.originalName}`)
+        }
+      }
+
+      const isMkvSource = m.originalPath.toLowerCase().endsWith(".mkv")
+      const isMp4Source = m.originalPath.toLowerCase().endsWith(".mp4")
+      const movieDir = join(config.outputDir, folderName(m, config))
+      const mkvBase = fileBase(m, "mkv", config)
+      const mp4Base = fileBase(m, "mp4", config)
 
       // 1. Convert MKV -> MP4 (if needed)
       let mp4Path: string | undefined
@@ -41,7 +57,7 @@ export async function runPipeline(
         onUpdate(movies, i, 0)
 
         const preset = 
-          m.confirmedFormat === "Blu-ray_4K" ? config.handbrakePreset4K :
+          m.confirmedFormat === "Blu-ray-4K" ? config.handbrakePreset4K :
           m.confirmedFormat === "Blu-ray" ? config.handbrakePresetBluRay :
           config.handbrakePresetDVD
 
@@ -60,18 +76,24 @@ export async function runPipeline(
         mp4Path = mp4Tmp
       }
 
+      // Which video files will exist in the movie folder?
+      const hasMkvOut = isMkvSource && m.conversionMode !== "mp4_only"
+      const hasMp4Out = !!mp4Path || isMp4Source
+      // Subtitles are written for the first video file; a copy is made for the second one.
+      const subBase = hasMkvOut ? mkvBase : mp4Base
+
       // 2. Subtitles
       m.status = "subtitles"
       onUpdate(movies, i, 0)
 
       let foundLangs: string[] = []
-      
-      if (m.originalPath.toLowerCase().endsWith(".mkv")) {
+
+      if (isMkvSource) {
         try {
           // Folder is ONLY created here if we actually start subtitle extraction
           mkdirSync(movieDir, { recursive: true })
           const extRes = await extractSubtitles(
-            m.originalPath, movieDir, baseName, 
+            m.originalPath, movieDir, subBase, 
             config.mkvmergePath, config.mkvextractPath, ["en", "de"]
           )
           foundLangs = extRes.filter(r => r.ok).map(r => r.lang)
@@ -84,7 +106,7 @@ export async function runPipeline(
         try {
           mkdirSync(movieDir, { recursive: true })
           await downloadSubtitles(
-            m.resolvedTitle, m.resolvedYear, movieDir, baseName,
+            m.resolvedTitle, m.resolvedYear, movieDir, subBase,
             config.opensubsApiKey, config.opensubsUsername, config.opensubsPassword,
             ["en", "de"], foundLangs
           )
@@ -93,20 +115,41 @@ export async function runPipeline(
         }
       }
 
-      // 3. Organize files into Plex structure
+      // MKV and MP4 have different tags, so the subtitles must exist under both names
+      if (hasMkvOut && hasMp4Out) {
+        try {
+          duplicateSubtitles(movieDir, mkvBase, mp4Base, ["en", "de"])
+        } catch (e) {
+          logError(e, `Subtitle copy: ${m.originalName}`)
+        }
+      }
+
+      // 3. Organize files into the Jellyfin structure
       m.status = "organizing"
       onUpdate(movies, i, 0)
-      
+
       // Ensure folder exists before moving/copying
       mkdirSync(movieDir, { recursive: true })
       organizeMovie(m, config.outputDir, config, mp4Path)
 
       // Cleanup original MKV if mp4_only
-      if (m.conversionMode === "mp4_only" && m.originalPath.toLowerCase().endsWith(".mkv")) {
+      if (m.conversionMode === "mp4_only" && isMkvSource) {
         try {
           unlinkSync(m.originalPath)
         } catch (e) {
           logError(e, `Cleanup MKV: ${m.originalName}`)
+        }
+      }
+
+      // 4. Artwork (optional, needs a TMDB API key). Errors never fail the movie.
+      if (config.tmdbApiKey) {
+        m.status = "artwork"
+        onUpdate(movies, i, 0)
+        try {
+          const art = await downloadPoster(m, movieDir, config)
+          if (!art.ok) logError(art.reason || "unknown", `Artwork: ${m.originalName}`)
+        } catch (e) {
+          logError(e, `Artwork: ${m.originalName}`)
         }
       }
 

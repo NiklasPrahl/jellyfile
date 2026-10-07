@@ -1,5 +1,6 @@
 import type { MovieFile, AppConfig } from "../types"
 import { logError } from "./pipeline"
+import { sanitizeTitle } from "./naming"
 
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -20,6 +21,7 @@ Antworte ausschließlich als JSON-Array:
 Regeln für den Titel:
 - Korrekte deutsche Groß-/Kleinschreibung
 - Sonderzeichen ' " , ? % & sind verboten. Ersetze & durch "and", alle anderen entfernen.
+- Verboten sind außerdem < > / \\ | * Entferne sie. Einen Doppelpunkt ersetzt du durch " - " (z.B. "Star Wars - Episode IV").
 - Umlaute sind erlaubt (ä, ö, ü, ß)
 
 Hier sind die Dateien:
@@ -68,7 +70,7 @@ async function callGroq(pending: MovieFile[], apiKey: string) {
   if (!res.ok) throw new Error(`Groq API ${res.status}: ${await res.text()}`)
   const data = await res.json() as any
   const content = data.choices?.[0]?.message?.content || "{}"
-  
+
   let parsed: any
   try {
     parsed = JSON.parse(content)
@@ -102,7 +104,7 @@ async function callOllama(pending: MovieFile[], baseUrl: string, model: string) 
   if (!res.ok) throw new Error(`Ollama API ${res.status}: ${await res.text()}`)
   const data = await res.json() as any
   const responseText = data.response || "[]"
-  
+
   let parsed: any
   try {
     parsed = JSON.parse(responseText)
@@ -110,7 +112,7 @@ async function callOllama(pending: MovieFile[], baseUrl: string, model: string) 
     const snippet = responseText.substring(0, 150) + (responseText.length > 150 ? "..." : "")
     throw new Error(`JSON Parse Error: ${err instanceof Error ? err.message : String(err)} (Raw Response: ${snippet})`)
   }
-  
+
   if (!Array.isArray(parsed)) {
     const key = Object.keys(parsed).find(k => Array.isArray(parsed[k]))
     if (key) parsed = parsed[key]
@@ -129,13 +131,13 @@ export async function resolveTitles(
 
   try {
     const results: any[] = []
-    
+
     // Process in chunks of 10 movies to stay within token limits and handle thinking models safely
     const chunkSize = 10
     for (let i = 0; i < pending.length; i += chunkSize) {
       const chunk = pending.slice(i, i + chunkSize)
       let chunkResults: any[] = []
-      
+
       if (config.llmProvider === "gemini") {
         if (!config.geminiApiKey) throw new Error("Gemini API Key missing")
         chunkResults = await callGemini(chunk, config.geminiApiKey)
@@ -145,7 +147,7 @@ export async function resolveTitles(
       } else if (config.llmProvider === "ollama") {
         chunkResults = await callOllama(chunk, config.ollamaBaseUrl, config.ollamaModel)
       }
-      
+
       results.push(...chunkResults)
       onProgress?.(Math.min(i + chunk.length, pending.length), pending.length)
     }
@@ -153,8 +155,9 @@ export async function resolveTitles(
     for (const res of results) {
       const movie = pending.find(m => m.originalName === res.original)
       if (movie) {
-        movie.resolvedTitle = res.title
-        movie.resolvedYear = res.year
+        // Jellyfin-safe title (illegal characters removed, ":" -> " - ")
+        movie.resolvedTitle = sanitizeTitle(String(res.title ?? ""))
+        movie.resolvedYear = String(res.year ?? "").trim()
         movie.status = "title-resolved"
       }
     }
