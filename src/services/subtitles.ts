@@ -1,4 +1,5 @@
-import { writeFileSync, existsSync } from "node:fs"
+import { writeFileSync, existsSync, copyFileSync } from "node:fs"
+import { join } from "node:path"
 import { spawnSync } from "node:child_process"
 
 const BASE = "https://api.opensubtitles.com/api/v1"
@@ -20,7 +21,7 @@ export async function extractSubtitles(
   } catch (err) {
     throw new Error(`mkvmerge not found or failed: ${err instanceof Error ? err.message : String(err)}`)
   }
-  
+
   if (idProc.status !== 0) {
     if (idProc.error) throw new Error(`mkvmerge error: ${idProc.error.message}`)
     return [] // Possibly just an invalid MKV or no tracks
@@ -59,7 +60,7 @@ export async function extractSubtitles(
     } catch (err) {
       throw new Error(`mkvextract not found or failed: ${err instanceof Error ? err.message : String(err)}`)
     }
-    
+
     if (extProc.status === 0) {
       for (const item of toExtract) {
         if (existsSync(item.outPath)) {
@@ -72,6 +73,30 @@ export async function extractSubtitles(
   }
 
   return results
+}
+
+/**
+ * Jellyfin only attaches an external subtitle if its name equals the video file name
+ * (plus language code). When a movie has two video files (MKV and MP4, which have
+ * different tags), the subtitles are copied for the second file name.
+ */
+export function duplicateSubtitles(
+  dir: string,
+  fromBase: string,
+  toBase: string,
+  languages: string[] = ["en", "de"]
+): string[] {
+  const copied: string[] = []
+  if (fromBase === toBase) return copied
+  for (const lang of languages) {
+    const src = join(dir, `${fromBase}.${lang}.srt`)
+    const dst = join(dir, `${toBase}.${lang}.srt`)
+    if (existsSync(src) && !existsSync(dst)) {
+      copyFileSync(src, dst)
+      copied.push(lang)
+    }
+  }
+  return copied
 }
 
 export async function downloadSubtitles(
@@ -88,7 +113,7 @@ export async function downloadSubtitles(
   const headers: Record<string, string> = {
     "Api-Key": apiKey,
     "Content-Type": "application/json",
-    "User-Agent": "PlexIngest v1.0",
+    "User-Agent": "Jellyfile v0.0.2",
   }
 
   let token = ""
