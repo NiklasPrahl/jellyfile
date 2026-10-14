@@ -11,6 +11,7 @@ export function loadConfig(): AppConfig {
     groqApiKey: process.env.GROQ_API_KEY || "",
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
     ollamaModel: process.env.OLLAMA_MODEL || "llama3",
+    llmAutoRetry: "off",
     opensubsApiKey: "",
     opensubsUsername: "",
     opensubsPassword: "",

@@ -49,6 +49,7 @@ const SETTINGS_GROUPS = [
       { key: "groqApiKey" as const, label: "Groq API Key", secret: true },
       { key: "ollamaBaseUrl" as const, label: "Ollama Base URL", secret: false },
       { key: "ollamaModel" as const, label: "Ollama Model", secret: false },
+      { key: "llmAutoRetry" as const, label: "Auto-Retry on overload (on/off)", secret: false },
     ]
   },
   {
@@ -611,6 +612,13 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
       render()
       return
     }
+    if (setting.key === "llmAutoRetry") {
+      config.llmAutoRetry = config.llmAutoRetry === "on" ? "off" : "on"
+      saveConfig(config)
+      status = `Auto-Retry on overload: ${config.llmAutoRetry}`
+      render()
+      return
+    }
     if (setting.key === "llmProvider") {
       const providers = ["gemini", "groq", "ollama"] as const
       const current = config.llmProvider as any
@@ -630,7 +638,14 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
       movies = scanDirectory(config.sourceDir, config)
       if (!movies.length) { error = `No files found!`; render(); return }
       status = `Resolving titles...`; render()
-      await resolveTitles(movies, config, (i, n) => { status = `Resolving: ${i}/${n}`; render() })
+      const retryAbort = new AbortController()
+      await resolveTitles(movies, config, {
+        onProgress: (i, n) => { status = `Resolving: ${i}/${n}`; render() },
+        onRetry: (s, attempt) => {
+          status = `LLM overloaded – retry #${attempt} in ${s}s... [Q=Abbrechen]`; render()
+        },
+        signal: retryAbort.signal,
+      })
       if (config.tmdbApiKey) {
         status = `Matching TMDB...`; render()
         await matchTmdb(movies, config, (i, n) => { status = `TMDB: ${i}/${n}`; render() })

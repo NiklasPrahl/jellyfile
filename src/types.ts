@@ -40,6 +40,8 @@ export interface AppConfig {
   groqApiKey: string
   ollamaBaseUrl: string
   ollamaModel: string
+  /** Retry the LLM call every 2 min on transient errors (5xx / network). Default "off". */
+  llmAutoRetry: Toggle
   opensubsApiKey: string
   opensubsUsername: string
   opensubsPassword: string
