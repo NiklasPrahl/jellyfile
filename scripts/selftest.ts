@@ -13,6 +13,7 @@ import { organizeMovie } from "../src/services/organizer"
 import { duplicateSubtitles } from "../src/services/subtitles"
 import { runPipeline } from "../src/services/pipeline"
 import { resolveTitles } from "../src/services/gemini"
+import { buildNfoXml, writeNfo } from "../src/services/nfo"
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6])
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
@@ -67,6 +68,34 @@ const mockFetch = async (input: any, init?: any) => {
     { file_path: "/de_best.png", iso_639_1: "de", vote_average: 5.5, vote_count: 12, width: 2000 },
     { file_path: "/none.jpg", iso_639_1: null, vote_average: 9, vote_count: 99, width: 2000 },
   ] })
+  // Full movie detail (append_to_response=credits,release_dates,videos) used by writeNfo
+  if (url.includes("/movie/238") && url.includes("append_to_response")) return json({
+    id: 238, title: "Der Pate", original_title: "The Godfather",
+    original_language: "en", overview: "Eine Mafiageschichte.",
+    vote_average: 8.7, release_date: "1972-03-14", runtime: 175,
+    tagline: "Ein Angebot, das man nicht ablehnen kann.",
+    imdb_id: "tt0068646",
+    genres: [{ id: 80, name: "Krimi" }, { id: 18, name: "Drama" }],
+    production_countries: [{ iso_3166_1: "US", name: "United States of America" }],
+    production_companies: [{ id: 4, name: "Paramount Pictures" }],
+    belongs_to_collection: { id: 230, name: "Der Pate Filmreihe" },
+    credits: {
+      crew: [
+        { job: "Director", department: "Directing", name: "Francis Ford Coppola" },
+        { job: "Screenplay", department: "Writing", name: "Mario Puzo" },
+      ],
+      cast: [
+        { name: "Marlon Brando", character: "Don Vito Corleone" },
+        { name: "Al Pacino", character: "Michael Corleone" },
+      ],
+    },
+    videos: { results: [
+      { site: "YouTube", type: "Trailer", key: "sY1S34973zA" },
+    ] },
+    release_dates: { results: [
+      { iso_3166_1: "DE", release_dates: [{ certification: "16", type: 3 }] },
+    ] },
+  })
   if (url.includes("/movie/404/images")) return json({ posters: [] })
   if (url.startsWith("https://image.tmdb.org/t/p/original/de_best.png"))
     return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => PNG.buffer }
@@ -225,7 +254,7 @@ test("pipeline: MP4 source -> folder, -MP4 tag, poster", async () => {
   await runPipeline([m], baseConfig({ outputDir: out, tmdbApiKey: "k", tmdbIdInFolder: "on" }), () => {})
   assert.equal(m.status, "done")
   const files = readdirSync(join(out, "Der Pate (1972) {tmdb-238}")).sort()
-  assert.deepEqual(files, ["Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4", "poster.png"])
+  assert.deepEqual(files, ["Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4", "movie.nfo", "poster.png"])
 })
 test("pipeline: MKV source (mkvmerge missing) still organizes; TMDB failure never fails the movie", async () => {
   const out = mkdtempSync(join(tmp, "p-")); const src = mkdtempSync(join(tmp, "i-"))
@@ -245,6 +274,66 @@ test("resolveTitles: LLM titles are sanitized for Jellyfin", async () => {
   assert.equal(list[1].resolvedTitle, "WasWer")
   assert.equal(list[0].status, "title-resolved")
 })
+
+// ---- NFO generation ---------------------------------------------------------
+test("buildNfoXml: contains required Jellyfin fields", () => {
+  const d = {
+    id: 238, title: "Der Pate", original_title: "The Godfather",
+    original_language: "en", overview: "Mafia.",
+    vote_average: 8.7, release_date: "1972-03-14", runtime: 175,
+    tagline: "Ein Angebot.", imdb_id: "tt0068646",
+    genres: [{ name: "Krimi" }],
+    production_countries: [{ name: "USA" }],
+    production_companies: [{ name: "Paramount Pictures" }],
+    belongs_to_collection: { name: "Der Pate Filmreihe" },
+    credits: {
+      crew: [{ job: "Director", department: "Directing", name: "Francis Ford Coppola" },
+             { job: "Screenplay", department: "Writing", name: "Mario Puzo" }],
+      cast: [{ name: "Marlon Brando", character: "Don Vito Corleone" },
+             { name: "Al Pacino", character: "Michael Corleone" }],
+    },
+    videos: { results: [{ site: "YouTube", type: "Trailer", key: "abc123" }] },
+    release_dates: { results: [{ iso_3166_1: "DE", release_dates: [{ certification: "16" }] }] },
+  }
+  const xml = buildNfoXml(d)
+  assert.ok(xml.startsWith("<?xml"), "starts with XML declaration")
+  assert.ok(xml.includes("<movie>") && xml.includes("</movie>"), "root element")
+  assert.ok(xml.includes("<tmdbid>238</tmdbid>"), "tmdbid")
+  assert.ok(xml.includes("<imdbid>tt0068646</imdbid>"), "imdbid")
+  assert.ok(xml.includes("<title>Der Pate</title>"), "title")
+  assert.ok(xml.includes("<originaltitle>The Godfather</originaltitle>"), "originaltitle")
+  assert.ok(xml.includes("<director>Francis Ford Coppola</director>"), "director")
+  assert.ok(xml.includes("<writer>Mario Puzo</writer>"), "writer")
+  assert.ok(xml.includes("<mpaa>FSK-16</mpaa>"), "FSK rating")
+  assert.ok(xml.includes("<year>1972</year>"), "year")
+  assert.ok(xml.includes("<genre>Krimi</genre>"), "genre")
+  assert.ok(xml.includes("<runtime>175</runtime>"), "runtime")
+  assert.ok(xml.includes("<lockdata>true</lockdata>"), "lockdata")
+  assert.ok(xml.includes("plugin://plugin.video.youtube/play/?video_id=abc123"), "trailer")
+  assert.ok(xml.includes("<name>Der Pate Filmreihe</name>"), "collection set")
+  assert.ok(xml.includes("<name>Marlon Brando</name>"), "actor name")
+  assert.ok(xml.includes("<role>Don Vito Corleone</role>"), "actor role")
+})
+
+test("writeNfo: creates movie.nfo via mocked TMDB; skips if already exists", async () => {
+  const dir = mkdtempSync(join(tmp, "nfo-"))
+  const m = movie({ tmdbId: 238 })
+  const cfg = baseConfig({ tmdbApiKey: "k" })
+
+  const res = await writeNfo(m, dir, cfg)
+  assert.ok(res.ok, "writeNfo succeeds")
+  assert.ok(!res.skipped, "first write is not skipped")
+  assert.ok(existsSync(join(dir, "movie.nfo")), "movie.nfo created")
+  const content = readFileSync(join(dir, "movie.nfo"), "utf-8")
+  assert.ok(content.includes("<tmdbid>238</tmdbid>"), "tmdbid in file")
+  assert.ok(content.includes("<title>Der Pate</title>"), "title in file")
+
+  // Second call must skip (never overwrite)
+  const res2 = await writeNfo(m, dir, cfg)
+  assert.ok(res2.ok && res2.skipped, "second call is skipped")
+})
+
+
 
 async function main() {
   let passed = 0

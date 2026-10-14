@@ -6,6 +6,7 @@ import { downloadSubtitles, extractSubtitles, duplicateSubtitles } from "./subti
 import { organizeMovie } from "./organizer"
 import { folderName, fileBase } from "./naming"
 import { downloadPoster, matchMovie } from "./artwork"
+import { writeNfo } from "./nfo"
 
 export function logError(error: any, context: string) {
   const logPath = join(process.cwd(), "pipeline_error.log")
@@ -150,6 +151,16 @@ export async function runPipeline(
           if (!art.ok) logError(art.reason || "unknown", `Artwork: ${m.originalName}`)
         } catch (e) {
           logError(e, `Artwork: ${m.originalName}`)
+        }
+      }
+
+      // 5. NFO (optional, needs a TMDB API key). Errors never fail the movie.
+      if (config.tmdbApiKey) {
+        try {
+          const nfo = await writeNfo(m, movieDir, config)
+          if (!nfo.ok && !nfo.skipped) logError(nfo.reason || "unknown", `NFO: ${m.originalName}`)
+        } catch (e) {
+          logError(e, `NFO: ${m.originalName}`)
         }
       }
 
