@@ -1,8 +1,51 @@
-import { writeFileSync, existsSync, copyFileSync } from "node:fs"
-import { join } from "node:path"
+import { writeFileSync, existsSync, copyFileSync, readdirSync } from "node:fs"
+import { join, dirname, extname, basename } from "node:path"
 import { spawnSync } from "node:child_process"
 
 const BASE = "https://api.opensubtitles.com/api/v1"
+
+/**
+ * Searches the directory containing videoPath for existing .srt files that belong
+ * to this movie, copies them into movieDir named `${baseName}.${lang}.srt`, and
+ * returns the array of language codes found.
+ */
+export function findLocalSubtitles(
+  videoPath: string,
+  movieDir: string,
+  baseName: string,
+  languages: string[] = ["en", "de"]
+): string[] {
+  const dir = dirname(videoPath)
+  const videoExt = extname(videoPath)
+  const videoBase = basename(videoPath, videoExt)
+  const found: string[] = []
+
+  try {
+    const entries = readdirSync(dir)
+    for (const f of entries) {
+      if (f.startsWith(".") || !f.toLowerCase().endsWith(".srt")) continue
+      const lower = f.toLowerCase()
+      if (lower.startsWith(videoBase.toLowerCase())) {
+        const rest = f.slice(videoBase.length).replace(/\.srt$/i, "").toLowerCase()
+        let lang = "de"
+        if (rest.includes(".en") || rest.includes("_en") || rest.includes(".eng") || rest.includes("english")) {
+          lang = "en"
+        } else if (rest.includes(".de") || rest.includes("_de") || rest.includes(".ger") || rest.includes(".deu") || rest.includes("german")) {
+          lang = "de"
+        }
+        if (languages.includes(lang)) {
+          const dest = join(movieDir, `${baseName}.${lang}.srt`)
+          if (!existsSync(dest)) {
+            copyFileSync(join(dir, f), dest)
+          }
+          if (!found.includes(lang)) found.push(lang)
+        }
+      }
+    }
+  } catch {}
+
+  return found
+}
 
 export async function extractSubtitles(
   mkvPath: string,

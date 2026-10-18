@@ -2,7 +2,7 @@ import { mkdirSync, appendFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import type { MovieFile, AppConfig } from "../types"
 import { convertToMp4 } from "./handbrake"
-import { downloadSubtitles, extractSubtitles, duplicateSubtitles } from "./subtitles"
+import { downloadSubtitles, extractSubtitles, duplicateSubtitles, findLocalSubtitles } from "./subtitles"
 import { organizeMovie } from "./organizer"
 import { folderName, fileBase } from "./naming"
 import { downloadPoster, matchMovie } from "./artwork"
@@ -51,9 +51,9 @@ export async function runPipeline(
       const mkvBase = fileBase(m, "mkv", config)
       const mp4Base = fileBase(m, "mp4", config)
 
-      // 1. Convert MKV -> MP4 (if needed)
+      // 1. Convert MKV -> MP4 (if needed; MP4 sources are already converted and skipped)
       let mp4Path: string | undefined
-      if (m.conversionMode !== "mkv_only") {
+      if (isMkvSource && m.conversionMode !== "mkv_only") {
         m.status = "converting"
         onUpdate(movies, i, 0)
 
@@ -89,15 +89,24 @@ export async function runPipeline(
 
       let foundLangs: string[] = []
 
+      // Check for local .srt files alongside the source video
+      try {
+        mkdirSync(movieDir, { recursive: true })
+        foundLangs = findLocalSubtitles(m.originalPath, movieDir, subBase, ["en", "de"])
+      } catch (e) {
+        logError(e, `Local Subtitles: ${m.originalName}`)
+      }
+
       if (isMkvSource) {
         try {
-          // Folder is ONLY created here if we actually start subtitle extraction
           mkdirSync(movieDir, { recursive: true })
           const extRes = await extractSubtitles(
             m.originalPath, movieDir, subBase, 
             config.mkvmergePath, config.mkvextractPath, ["en", "de"]
           )
-          foundLangs = extRes.filter(r => r.ok).map(r => r.lang)
+          for (const r of extRes) {
+            if (r.ok && !foundLangs.includes(r.lang)) foundLangs.push(r.lang)
+          }
         } catch (e) {
           logError(e, `Subtitle Extraction: ${m.originalName}`)
         }

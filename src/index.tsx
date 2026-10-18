@@ -656,7 +656,20 @@ renderer.keyInput.on("keypress", async (keyEvent) => {
   }
   if (view === "review") {
     if (key === "f") { if (movies[sel]) { const idx = FORMATS.indexOf(movies[sel].confirmedFormat); movies[sel].confirmedFormat = FORMATS[(idx + 1) % 3]; render() }; return }
-    if (key === "m") { if (movies[sel]) { const MODES = ["keep_both", "mp4_only", "mkv_only"] as const; const idx = MODES.indexOf(movies[sel].conversionMode as any); movies[sel].conversionMode = MODES[(idx + 1) % 3]; render() }; return }
+    if (key === "m") {
+      if (movies[sel]) {
+        if (movies[sel].originalPath.toLowerCase().endsWith(".mp4")) {
+          status = "Already MP4 (no conversion needed)"
+          render()
+          return
+        }
+        const MODES = ["keep_both", "mp4_only", "mkv_only"] as const
+        const idx = MODES.indexOf(movies[sel].conversionMode as any)
+        movies[sel].conversionMode = MODES[(idx + 1) % 3]
+        render()
+      }
+      return
+    }
     if (key === "t") { if (movies[sel]) { editIdx = sel; editType = "title"; editVal = movies[sel].resolvedTitle; render() }; return }
     if (key === "y") { if (movies[sel]) { editIdx = sel; editType = "year"; editVal = movies[sel].resolvedYear; render() }; return }
     if (key === "return") { for (const m of movies) if (m.status === "title-resolved" || m.status === "pending" || m.status === "error") m.status = "ready"; flowStep = "progress"; setView("progress"); return }

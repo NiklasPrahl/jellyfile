@@ -14,6 +14,7 @@ import { duplicateSubtitles } from "../src/services/subtitles"
 import { runPipeline } from "../src/services/pipeline"
 import { resolveTitles } from "../src/services/gemini"
 import { buildNfoXml, writeNfo } from "../src/services/nfo"
+import { scanDirectory, detectFormat, extractBaseName, extractYear } from "../src/services/scanner"
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6])
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
@@ -246,15 +247,65 @@ test("organizeMovie: MKV + converted MP4 get matching names", () => {
     ["Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4", "Der Pate (1972) {tmdb-238} - [Blu-ray].mkv"])
 })
 
+// ---- scanner (MP4 & MKV detection) -------------------------------------------
+test("scanner: MP4 files are detected with mp4_only mode, clean title, year, and format hints", () => {
+  const src = mkdtempSync(join(tmp, "scan-"))
+  writeFileSync(join(src, "Inception (2010) {tmdb-27205} - [Blu-ray-4K-MP4].mp4"), "fake")
+  writeFileSync(join(src, "Matrix (1999) - [Blu-ray-MP4].mp4"), "fake")
+  writeFileSync(join(src, "Movie_t00.mkv"), "fake")
+
+  const scanned = scanDirectory(src, baseConfig())
+  assert.equal(scanned.length, 3)
+
+  const inception = scanned.find(m => m.originalName.startsWith("Inception"))!
+  assert.equal(inception.conversionMode, "mp4_only")
+  assert.equal(inception.keepMkv, false)
+  assert.equal(inception.detectedFormat, "Blu-ray-4K")
+  assert.equal(inception.resolvedTitle, "Inception")
+  assert.equal(inception.resolvedYear, "2010")
+  assert.equal(inception.tmdbId, 27205)
+
+  const matrix = scanned.find(m => m.originalName.startsWith("Matrix"))!
+  assert.equal(matrix.conversionMode, "mp4_only")
+  assert.equal(matrix.keepMkv, false)
+  assert.equal(matrix.detectedFormat, "Blu-ray")
+  assert.equal(matrix.resolvedTitle, "Matrix")
+  assert.equal(matrix.resolvedYear, "1999")
+
+  const mkv = scanned.find(m => m.originalName.endsWith(".mkv"))!
+  assert.equal(mkv.conversionMode, "keep_both")
+  assert.equal(mkv.keepMkv, true)
+  assert.equal(mkv.resolvedTitle, "Movie")
+})
+
 // ---- pipeline (no HandBrake, no mkvtoolnix): MP4 source ------------------------
-test("pipeline: MP4 source -> folder, -MP4 tag, poster", async () => {
+test("pipeline: MP4 source -> folder, -MP4 tag, poster (no HandBrake even with mp4_only)", async () => {
   const out = mkdtempSync(join(tmp, "p-")); const src = mkdtempSync(join(tmp, "i-"))
   writeFileSync(join(src, "a.mp4"), "mp4")
-  const m = movie({ originalPath: join(src, "a.mp4"), originalName: "a.mp4", conversionMode: "mkv_only" })
+  // Even with conversionMode: "mp4_only", HandBrake is NOT called (handbrakePath is an invalid path)
+  const m = movie({ originalPath: join(src, "a.mp4"), originalName: "a.mp4", conversionMode: "mp4_only" })
   await runPipeline([m], baseConfig({ outputDir: out, tmdbApiKey: "k", tmdbIdInFolder: "on" }), () => {})
   assert.equal(m.status, "done")
   const files = readdirSync(join(out, "Der Pate (1972) {tmdb-238}")).sort()
   assert.deepEqual(files, ["Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4", "movie.nfo", "poster.png"])
+})
+
+test("pipeline: MP4 source preserves local .srt subtitles into Jellyfin movie folder", async () => {
+  const out = mkdtempSync(join(tmp, "p-sub-")); const src = mkdtempSync(join(tmp, "i-sub-"))
+  writeFileSync(join(src, "film.mp4"), "mp4")
+  writeFileSync(join(src, "film.de.srt"), "1\n00:00:01,000 --> 00:00:02,000\nHallo")
+  writeFileSync(join(src, "film.en.srt"), "1\n00:00:01,000 --> 00:00:02,000\nHello")
+  const m = movie({ originalPath: join(src, "film.mp4"), originalName: "film.mp4", conversionMode: "mp4_only" })
+  await runPipeline([m], baseConfig({ outputDir: out, tmdbApiKey: "k", tmdbIdInFolder: "on" }), () => {})
+  assert.equal(m.status, "done")
+  const files = readdirSync(join(out, "Der Pate (1972) {tmdb-238}")).sort()
+  assert.deepEqual(files, [
+    "Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].de.srt",
+    "Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].en.srt",
+    "Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4",
+    "movie.nfo",
+    "poster.png",
+  ])
 })
 test("pipeline: MKV source (mkvmerge missing) still organizes; TMDB failure never fails the movie", async () => {
   const out = mkdtempSync(join(tmp, "p-")); const src = mkdtempSync(join(tmp, "i-"))
