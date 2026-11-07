@@ -31,7 +31,10 @@ let scrollOffset = 0
 const VERSION = "0.0.2"
 const FORMATS: MediaFormat[] = ["DVD", "Blu-ray", "Blu-ray-4K"]
 
-const SETTINGS_GROUPS = [
+interface SettingItem { key: keyof AppConfig; label: string; secret: boolean }
+interface SettingGroup { label: string; items: SettingItem[] }
+
+const SETTINGS_GROUPS: SettingGroup[] = [
   {
     label: "Directories",
     items: [
@@ -77,9 +80,10 @@ const SETTINGS_GROUPS = [
     ]
   },
   {
-    label: "Artwork (TMDB)",
+    label: "Artwork (TMDB / fanart.tv)",
     items: [
       { key: "tmdbApiKey" as const, label: "TMDB API Key", secret: true },
+      { key: "fanartApiKey" as const, label: "fanart.tv API Key (optional)", secret: true },
       { key: "posterLanguages" as const, label: "Poster Langs (de,en,null)", secret: false },
       { key: "tmdbIdInFolder" as const, label: "TMDB ID in names (on/off)", secret: false },
     ]
@@ -87,6 +91,8 @@ const SETTINGS_GROUPS = [
 ]
 
 const ALL_SETTINGS = SETTINGS_GROUPS.flatMap(g => g.items)
+/** Label column: "> " + longest label + ":" + one space gap, so labels never touch their values. */
+const SETTINGS_LABEL_WIDTH = Math.max(...ALL_SETTINGS.map(s => s.label.length)) + 4
 
 // ── Colors ─────────────────────────────────────────────────────────────────
 const C = {
@@ -269,7 +275,9 @@ function renderContent(): any[] {
 // ── Init View ──────────────────────────────────────────────────────────────
 function renderInit(): any[] {
   const out: any[] = [
-    Box({ width: "100%", alignItems: "center", marginTop: 0, marginBottom: 1 },
+    // flexShrink 0: if the fixed-height panel gets too full, Yoga would otherwise
+    // squeeze this block and its lines would be drawn on top of each other
+    Box({ width: "100%", alignItems: "center", marginTop: 0, marginBottom: 1, flexShrink: 0 },
       Text({ content: t`${bold(fg(C.text)("Welcome to Jellyfile!"))}` }),
       Text({ content: t`${fg(C.dim)("Verify your directories to get started.")}` }),
       ...(config.tmdbApiKey ? [Text({ content: t`${fg(C.dim)(TMDB_ATTRIBUTION)}` })] : []),
@@ -293,7 +301,8 @@ function renderInit(): any[] {
       ))
     }
   }
-  out.push(Box({ width: "100%", height: 3, backgroundColor: C.panel }))
+  // 2 rows (not 3): welcome block + TMDB attribution + spacer + button + status must fit the 12 inner rows
+  out.push(Box({ width: "100%", height: 2, backgroundColor: C.panel }))
   out.push(Box({ width: "100%", height: 3, justifyContent: "center", alignItems: "center", borderStyle: "double", borderColor: sel === 2 ? C.accent : C.border, backgroundColor: sel === 2 ? "#252b37" : C.panel },
     Text({ content: t`${sel === 2 ? bold(fg(C.accent)(">>> START SCAN <<<")) : fg(C.dim)("START SCAN")}` })
   ))
@@ -330,12 +339,12 @@ function renderSettings(): any[] {
 
       if (editIdx === currentAbs && editType === "setting") {
         rows.push(Box({ flexDirection: "row", width: "100%", backgroundColor: "#252b37", paddingLeft: 1, height: 1 },
-          Box({ width: 28 }, Text({ content: t`${fg(C.accent)(prefixStr + s.label + ":")}` })),
+          Box({ width: SETTINGS_LABEL_WIDTH }, Text({ content: t`${fg(C.accent)(prefixStr + s.label + ":")}` })),
           Box({ flexGrow: 1 }, Text({ content: t`${fg(C.green)((editVal + "_").substring(0, 45))}` }))
         ))
       } else {
         rows.push(Box({ flexDirection: "row", width: "100%", backgroundColor: isSel ? "#252b37" : C.panel, paddingLeft: 1, height: 1 },
-          Box({ width: 28 }, Text({ content: t`${fg(color)(prefixStr + s.label + ":")}` })),
+          Box({ width: SETTINGS_LABEL_WIDTH }, Text({ content: t`${fg(color)(prefixStr + s.label + ":")}` })),
           Box({ flexGrow: 1 }, Text({ content: t`${fg(C.dim)(disp.substring(0, 45))}` }))
         ))
       }
