@@ -152,6 +152,16 @@ export function pickPoster(posters: any[], langs: string[]): any | null {
   return posters.length ? [...posters].sort(rank)[0] : null
 }
 
+/**
+ * Backdrop choice: "No Language" (iso_639_1: null / textless) is preferred
+ * because backdrops look cleanest without burned-in text. Falls back to
+ * language-specific backdrops if no textless backdrop exists.
+ */
+export function pickBackdrop(backdrops: any[], langs: string[] = DEFAULT_LANGS): any | null {
+  const backdropLangs = ["null", ...langs.filter((l) => l !== "null")]
+  return pickPoster(backdrops, backdropLangs)
+}
+
 export function sniffImageExt(buf: Uint8Array): string | null {
   if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpg"
   if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "png"
@@ -238,9 +248,10 @@ export async function downloadArtwork(
   }
 
   const langs = parseLanguages(config.posterLanguages)
+  const reqLangs = Array.from(new Set([...langs, "null"]))
   const data = await tmdbGet(
     `/movie/${m.tmdbId}/images`,
-    { include_image_language: langs.join(",") },
+    { include_image_language: reqLangs.join(",") },
     config.tmdbApiKey
   )
 
@@ -256,9 +267,9 @@ export async function downloadArtwork(
     }
   }
 
-  // 2. Backdrop
+  // 2. Backdrop ("No Language" / textless preferred)
   if (needBackdrop) {
-    const chosen = pickPoster(data.backdrops || [], langs)
+    const chosen = pickBackdrop(data.backdrops || [], langs)
     if (chosen?.file_path) {
       const dl = await downloadSingleImage(chosen.file_path, "backdrop", dir)
       if (dl.ok && dl.file) result.backdrop = dl.file

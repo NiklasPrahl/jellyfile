@@ -8,7 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AppConfig, MovieFile } from "../src/types"
 import { sanitizeTitle, folderName, fileName, fileBase, formatTag, startsWithFolder } from "../src/services/naming"
-import { pickBest, pickPoster, matchMovie, matchTmdb, downloadPoster, downloadArtwork, sniffImageExt, hasPoster, hasBackdrop, hasLogo } from "../src/services/artwork"
+import { pickBest, pickPoster, pickBackdrop, matchMovie, matchTmdb, downloadPoster, downloadArtwork, sniffImageExt, hasPoster, hasBackdrop, hasLogo } from "../src/services/artwork"
 import { organizeMovie } from "../src/services/organizer"
 import { duplicateSubtitles } from "../src/services/subtitles"
 import { runPipeline } from "../src/services/pipeline"
@@ -187,6 +187,22 @@ test("pickPoster: language order de > en > null, best rating inside language", (
   assert.equal(pickPoster(posters, ["null", "de"]).file_path, "/nul")
   assert.equal(pickPoster([posters[0]], ["de"]).file_path, "/en") // fallback: anything
   assert.equal(pickPoster([], ["de"]), null)
+})
+test("pickBackdrop: prefers 'null' (No Language / textless) over language backdrops", () => {
+  const backdrops = [
+    { file_path: "/de.jpg", iso_639_1: "de", vote_average: 9.5 },
+    { file_path: "/en.jpg", iso_639_1: "en", vote_average: 8.0 },
+    { file_path: "/textless.jpg", iso_639_1: null, vote_average: 7.0 },
+  ]
+  // Even with default ["de", "en", "null"], pickBackdrop puts "null" first
+  assert.equal(pickBackdrop(backdrops, ["de", "en", "null"]).file_path, "/textless.jpg")
+  // Falls back to language-specific backdrop if no null backdrop is present
+  const withLangOnly = [
+    { file_path: "/de.jpg", iso_639_1: "de", vote_average: 9.0 },
+    { file_path: "/en.jpg", iso_639_1: "en", vote_average: 9.5 },
+  ]
+  assert.equal(pickBackdrop(withLangOnly, ["de", "en", "null"]).file_path, "/de.jpg")
+  assert.equal(pickBackdrop([], ["de", "en", "null"]), null)
 })
 test("sniffImageExt", () => {
   assert.equal(sniffImageExt(JPEG), "jpg"); assert.equal(sniffImageExt(PNG), "png")
