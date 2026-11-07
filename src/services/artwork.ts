@@ -165,11 +165,116 @@ export function hasPoster(dir: string): boolean {
   return readdirSync(dir).some((f) => /^poster\.(jpe?g|png|webp)$/i.test(f))
 }
 
+export function hasBackdrop(dir: string): boolean {
+  if (!existsSync(dir)) return false
+  return readdirSync(dir).some((f) => /^(backdrop|fanart)\.(jpe?g|png|webp)$/i.test(f))
+}
+
+export function hasLogo(dir: string): boolean {
+  if (!existsSync(dir)) return false
+  return readdirSync(dir).some((f) => /^(logo|clearlogo)\.(jpe?g|png|webp)$/i.test(f))
+}
+
 export interface PosterResult {
   ok: boolean
   skipped?: boolean
   file?: string
   reason?: string
+}
+
+export interface ArtworkResult {
+  ok: boolean
+  skipped?: boolean
+  poster?: string
+  backdrop?: string
+  logo?: string
+  reason?: string
+}
+
+async function downloadSingleImage(
+  path: string,
+  baseName: string,
+  dir: string
+): Promise<{ ok: boolean; file?: string; reason?: string }> {
+  try {
+    const res = await fetch(`${IMAGE_BASE}${path}`)
+    if (!res.ok) return { ok: false, reason: `download failed (${res.status})` }
+    const buf = new Uint8Array(await res.arrayBuffer())
+    const ext = sniffImageExt(buf)
+    if (!ext) return { ok: false, reason: "downloaded file is not a known image format" }
+
+    const file = join(dir, `${baseName}.${ext}`)
+    writeFileSync(file, buf, { flag: "wx" })
+    return { ok: true, file }
+  } catch (err: any) {
+    if (err?.code === "EEXIST") {
+      return { ok: true, reason: "already exists" }
+    }
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Downloads all primary artwork for Jellyfin:
+ * - poster.<ext>
+ * - backdrop.<ext> (fanart / background)
+ * - logo.<ext> (clearlogo / title treatment)
+ * Never overwrites existing images.
+ */
+export async function downloadArtwork(
+  m: MovieFile,
+  dir: string,
+  config: AppConfig
+): Promise<ArtworkResult> {
+  if (!config.tmdbApiKey) return { ok: false, reason: "no TMDB API key" }
+  if (!m.tmdbId) return { ok: false, reason: "no TMDB match" }
+
+  const needPoster = !hasPoster(dir)
+  const needBackdrop = !hasBackdrop(dir)
+  const needLogo = !hasLogo(dir)
+
+  if (!needPoster && !needBackdrop && !needLogo) {
+    return { ok: true, skipped: true, reason: "all artwork already exists" }
+  }
+
+  const langs = parseLanguages(config.posterLanguages)
+  const data = await tmdbGet(
+    `/movie/${m.tmdbId}/images`,
+    { include_image_language: langs.join(",") },
+    config.tmdbApiKey
+  )
+
+  const result: ArtworkResult = { ok: true }
+
+  // 1. Poster
+  if (needPoster) {
+    const chosen = pickPoster(data.posters || [], langs)
+    const path: string | undefined = chosen?.file_path || m.tmdbPoster
+    if (path) {
+      const dl = await downloadSingleImage(path, "poster", dir)
+      if (dl.ok && dl.file) result.poster = dl.file
+    }
+  }
+
+  // 2. Backdrop
+  if (needBackdrop) {
+    const chosen = pickPoster(data.backdrops || [], langs)
+    if (chosen?.file_path) {
+      const dl = await downloadSingleImage(chosen.file_path, "backdrop", dir)
+      if (dl.ok && dl.file) result.backdrop = dl.file
+    }
+  }
+
+  // 3. Logo (Schriftzugdatei für Jellyfin)
+  if (needLogo) {
+    const chosen = pickPoster(data.logos || [], langs)
+    if (chosen?.file_path) {
+      const dl = await downloadSingleImage(chosen.file_path, "logo", dir)
+      if (dl.ok && dl.file) result.logo = dl.file
+    }
+  }
+
+  return result
 }
 
 export async function downloadPoster(m: MovieFile, dir: string, config: AppConfig): Promise<PosterResult> {
@@ -187,13 +292,8 @@ export async function downloadPoster(m: MovieFile, dir: string, config: AppConfi
   const path: string | undefined = chosen?.file_path || m.tmdbPoster
   if (!path) return { ok: false, reason: "TMDB has no poster for this movie" }
 
-  const res = await fetch(`${IMAGE_BASE}${path}`)
-  if (!res.ok) return { ok: false, reason: `poster download failed (${res.status})` }
-  const buf = new Uint8Array(await res.arrayBuffer())
-  const ext = sniffImageExt(buf)
-  if (!ext) return { ok: false, reason: "downloaded file is not a known image format" }
-
-  const file = join(dir, `poster.${ext}`)
-  writeFileSync(file, buf, { flag: "wx" }) // "wx": never overwrite
-  return { ok: true, file }
+  const dl = await downloadSingleImage(path, "poster", dir)
+  if (!dl.ok) return { ok: false, reason: dl.reason }
+  return { ok: true, file: dl.file }
 }
+

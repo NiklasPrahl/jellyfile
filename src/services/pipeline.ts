@@ -5,7 +5,7 @@ import { convertToMp4 } from "./handbrake"
 import { downloadSubtitles, extractSubtitles, duplicateSubtitles, findLocalSubtitles } from "./subtitles"
 import { organizeMovie } from "./organizer"
 import { folderName, fileBase } from "./naming"
-import { downloadPoster, matchMovie } from "./artwork"
+import { downloadArtwork, matchMovie } from "./artwork"
 import { writeNfo } from "./nfo"
 
 export function logError(error: any, context: string) {
@@ -156,8 +156,8 @@ export async function runPipeline(
         m.status = "artwork"
         onUpdate(movies, i, 0)
         try {
-          const art = await downloadPoster(m, movieDir, config)
-          if (!art.ok) logError(art.reason || "unknown", `Artwork: ${m.originalName}`)
+          const art = await downloadArtwork(m, movieDir, config)
+          if (!art.ok && !art.skipped) logError(art.reason || "unknown", `Artwork: ${m.originalName}`)
         } catch (e) {
           logError(e, `Artwork: ${m.originalName}`)
         }

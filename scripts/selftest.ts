@@ -8,7 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AppConfig, MovieFile } from "../src/types"
 import { sanitizeTitle, folderName, fileName, fileBase, formatTag, startsWithFolder } from "../src/services/naming"
-import { pickBest, pickPoster, matchMovie, matchTmdb, downloadPoster, sniffImageExt, hasPoster } from "../src/services/artwork"
+import { pickBest, pickPoster, matchMovie, matchTmdb, downloadPoster, downloadArtwork, sniffImageExt, hasPoster, hasBackdrop, hasLogo } from "../src/services/artwork"
 import { organizeMovie } from "../src/services/organizer"
 import { duplicateSubtitles } from "../src/services/subtitles"
 import { runPipeline } from "../src/services/pipeline"
@@ -63,12 +63,20 @@ const mockFetch = async (input: any, init?: any) => {
     if (q === "Unbekannt") return json({ results: [] })
     return json({ results: [] })
   }
-  if (url.includes("/movie/238/images")) return json({ posters: [
-    { file_path: "/en_low.jpg", iso_639_1: "en", vote_average: 3, vote_count: 5, width: 1000 },
-    { file_path: "/de_low.jpg", iso_639_1: "de", vote_average: 5.1, vote_count: 9, width: 2000 },
-    { file_path: "/de_best.png", iso_639_1: "de", vote_average: 5.5, vote_count: 12, width: 2000 },
-    { file_path: "/none.jpg", iso_639_1: null, vote_average: 9, vote_count: 99, width: 2000 },
-  ] })
+  if (url.includes("/movie/238/images")) return json({
+    posters: [
+      { file_path: "/en_low.jpg", iso_639_1: "en", vote_average: 3, vote_count: 5, width: 1000 },
+      { file_path: "/de_low.jpg", iso_639_1: "de", vote_average: 5.1, vote_count: 9, width: 2000 },
+      { file_path: "/de_best.png", iso_639_1: "de", vote_average: 5.5, vote_count: 12, width: 2000 },
+      { file_path: "/none.jpg", iso_639_1: null, vote_average: 9, vote_count: 99, width: 2000 },
+    ],
+    backdrops: [
+      { file_path: "/de_backdrop.jpg", iso_639_1: null, vote_average: 8.5, vote_count: 20, width: 3840 },
+    ],
+    logos: [
+      { file_path: "/de_logo.png", iso_639_1: "de", vote_average: 7.0, vote_count: 10, width: 1000 },
+    ],
+  })
   // Full movie detail (append_to_response=credits,release_dates,videos) used by writeNfo
   if (url.includes("/movie/238") && url.includes("append_to_response")) return json({
     id: 238, title: "Der Pate", original_title: "The Godfather",
@@ -97,8 +105,12 @@ const mockFetch = async (input: any, init?: any) => {
       { iso_3166_1: "DE", release_dates: [{ certification: "16", type: 3 }] },
     ] },
   })
-  if (url.includes("/movie/404/images")) return json({ posters: [] })
+  if (url.includes("/movie/404/images")) return json({ posters: [], backdrops: [], logos: [] })
   if (url.startsWith("https://image.tmdb.org/t/p/original/de_best.png"))
+    return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => PNG.buffer }
+  if (url.startsWith("https://image.tmdb.org/t/p/original/de_backdrop.jpg"))
+    return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => JPEG.buffer }
+  if (url.startsWith("https://image.tmdb.org/t/p/original/de_logo.png"))
     return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => PNG.buffer }
   if (url.startsWith("https://image.tmdb.org/t/p/original/fallback.jpg"))
     return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => JPEG.buffer }
@@ -229,6 +241,36 @@ test("downloadPoster: falls back to search poster_path", async () => {
   ;(globalThis as any).fetch = prev
   assert.ok(r.ok && r.file!.endsWith("poster.jpg"))
 })
+test("downloadArtwork: downloads poster, backdrop, and logo into the movie folder", async () => {
+  const c = baseConfig({ tmdbApiKey: "k" })
+  const dir = mkdtempSync(join(tmp, "art-"))
+  const m = movie({ tmdbId: 238 })
+
+  const res = await downloadArtwork(m, dir, c)
+  assert.equal(res.ok, true)
+  assert.ok(hasPoster(dir), "poster exists")
+  assert.ok(hasBackdrop(dir), "backdrop exists")
+  assert.ok(hasLogo(dir), "logo exists")
+  assert.ok(existsSync(join(dir, "poster.png")), "poster.png exists")
+  assert.ok(existsSync(join(dir, "backdrop.jpg")), "backdrop.jpg exists")
+  assert.ok(existsSync(join(dir, "logo.png")), "logo.png exists")
+
+  // Second run skips when all exist
+  const res2 = await downloadArtwork(m, dir, c)
+  assert.equal(res2.ok, true)
+  assert.equal(res2.skipped, true)
+})
+test("hasBackdrop and hasLogo: identify existing image variations", () => {
+  const d = mkdtempSync(join(tmp, "art-has-"))
+  assert.equal(hasBackdrop(d), false)
+  assert.equal(hasLogo(d), false)
+
+  writeFileSync(join(d, "fanart.webp"), "fanart")
+  assert.equal(hasBackdrop(d), true)
+
+  writeFileSync(join(d, "clearlogo.png"), "clearlogo")
+  assert.equal(hasLogo(d), true)
+})
 
 // ---- subtitles / organizer ----------------------------------------------------
 test("duplicateSubtitles copies per language, never overwrites", () => {
@@ -287,7 +329,13 @@ test("pipeline: MP4 source -> folder, -MP4 tag, poster (no HandBrake even with m
   await runPipeline([m], baseConfig({ outputDir: out, tmdbApiKey: "k", tmdbIdInFolder: "on" }), () => {})
   assert.equal(m.status, "done")
   const files = readdirSync(join(out, "Der Pate (1972) {tmdb-238}")).sort()
-  assert.deepEqual(files, ["Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4", "movie.nfo", "poster.png"])
+  assert.deepEqual(files, [
+    "Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4",
+    "backdrop.jpg",
+    "logo.png",
+    "movie.nfo",
+    "poster.png",
+  ])
 })
 
 test("pipeline: MP4 source preserves local .srt subtitles into Jellyfin movie folder", async () => {
@@ -303,6 +351,8 @@ test("pipeline: MP4 source preserves local .srt subtitles into Jellyfin movie fo
     "Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].de.srt",
     "Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].en.srt",
     "Der Pate (1972) {tmdb-238} - [Blu-ray-MP4].mp4",
+    "backdrop.jpg",
+    "logo.png",
     "movie.nfo",
     "poster.png",
   ])
