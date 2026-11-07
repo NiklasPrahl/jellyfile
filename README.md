@@ -17,12 +17,14 @@ A specialized TUI-based pipeline for automated movie disc digitization and organ
 ---
 
 ## Features
-- **Automated Scanning**: Detects and scans movie disc directories.
+- **Automated Scanning**: Detects and scans movie disc directories as well as pre-converted MP4 files.
+- **Smart MP4 Handling**: Pre-converted MP4 input files skip HandBrake re-encoding while still performing organization, naming, artwork, subtitles, and NFO generation.
 - **AI-Powered Metadata**: Uses Gemini, Groq, or Ollama to resolve titles and release years automatically.
 - **HandBrake Integration**: Fully automated conversion pipeline for DVD, Blu-ray, and 4K media.
 - **Subtitle Support**: Automated subtitle extraction and OpenSubtitles integration.
 - **Jellyfin-ready Naming**: One folder per movie, versions told apart by a tag, subtitles that match the video names (see below).
-- **Artwork (optional)**: Downloads the poster from TMDB in original quality as `poster.jpg`/`poster.png` into the movie folder. Existing posters are never overwritten, so you can swap them any time.
+- **Artwork**: Downloads posters, backdrops, and logos from TMDB in original quality (`poster.<ext>`, `backdrop.<ext>`, `logo.<ext>`). Backdrops prioritize textless images ("No Language"). Existing images are never overwritten.
+- **Jellyfin NFO Generation**: Creates compliant `movie.nfo` files with title locking (`<lockedfields>Name</lockedfields>`) when custom titles are set, while keeping `<lockdata>false</lockdata>` and omitting image tags so Jellyfin can still scrape additional online metadata and images.
 - **Customizable Organization**: Define your own folder and file naming structures.
 
 ---
@@ -79,9 +81,13 @@ Der Pate (1972)/
   Der Pate (1972) - [Blu-ray-MP4].de.srt     <- copy, so Jellyfin finds it for the MP4, too
   Der Pate (1972) - [Blu-ray-MP4].en.srt
   poster.jpg
+  backdrop.jpg
+  logo.png
+  movie.nfo
 ```
 
 - The tag is the media format: `DVD`, `Blu-ray`, `Blu-ray-4K`. **MP4 files always get `-MP4`** (`[Blu-ray-4K-MP4]`) so the versions can be told apart in Jellyfin.
+- **Pre-converted MP4 files**: If you drop existing MP4 files into the input directory, Jellyfin recognizes them without re-encoding, organizes them into movie folders, and downloads subtitles, artwork, and NFO metadata.
 - Every video file starts exactly with the folder name (including year and optional `{tmdb-ID}`), as Jellyfin requires for multiple versions.
 - Characters that are illegal on SMB/Windows/Jellyfin (`< > : " / \ | ? *`) are removed; a colon becomes ` - `. Names are Unicode-normalized (NFC).
 - Subtitles are named like the video plus language (`.de.srt`, `.en.srt`). For movies with both MKV and MP4 they are written under both names.
@@ -100,15 +106,24 @@ Keep the file pattern starting with the same text as the folder pattern; otherwi
 
 ---
 
-## Artwork via TMDB
+## Artwork & NFO Metadata (TMDB)
 
 1. Create a free account at [themoviedb.org](https://www.themoviedb.org/) and request an API key (Settings > API). Both the v3 API key and the v4 "API Read Access Token" work.
 2. Enter it in **Settings > Artwork (TMDB) > TMDB API Key** (or set `TMDB_API_KEY`).
-3. In the review step a new column shows which TMDB movie was matched. If it is wrong, edit title/year (`T` / `Y`); the match is refreshed automatically.
-4. During processing the poster is saved next to the movie. Poster language order: `Poster Langs` (default `de,en,null`; `null` = poster without text).
+3. In the review step a column shows which TMDB movie was matched. If it is wrong, edit title/year (`T` / `Y`); the match is refreshed automatically.
+4. During processing, artwork is saved next to the movie in original quality:
+   - **Posters**: `poster.<ext>` according to language preference (`Poster Langs`, default `de,en,null`).
+   - **Backdrops**: `backdrop.<ext>` — textless backdrops (`null` / "No Language") are prioritized to ensure clean backgrounds without burned-in text.
+   - **Logos**: `logo.<ext>` (clearlogo).
+   - Existing artwork is never overwritten.
+5. **Jellyfin NFO generation (`movie.nfo`)**:
+   - Generates compliant XML metadata with `<lockdata>false</lockdata>` so Jellyfin can fetch further online metadata, backdrops, and logos.
+   - If an edited/custom title is set, only the title is locked: `<lockedfields>Name</lockedfields>`.
+   - No forced image path tags (`<art>`, `<thumb>`, `<fanart>`, `<poster>`) are written into the NFO, ensuring Jellyfin's online scrapers and local images coexist smoothly.
+   - Existing NFO files are updated non-destructively: third-party tags are retained, global locks (`lockdata=true`) are cleared, and only the title lock is maintained.
 
-Without a TMDB key nothing changes: the artwork step is skipped.
+Without a TMDB key nothing changes: artwork and rich TMDB NFO fields are skipped.
 
-TMDB data is only used for IDs and artwork and is never sent to the LLM.
+TMDB data is only used for IDs, artwork, and NFO metadata, and is never sent to the LLM.
 
 **Attribution:** This product uses the TMDB API but is not endorsed or certified by TMDB. ([TMDB](https://www.themoviedb.org/))
