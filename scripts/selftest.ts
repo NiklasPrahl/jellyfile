@@ -8,7 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AppConfig, MovieFile } from "../src/types"
 import { sanitizeTitle, folderName, fileName, fileBase, formatTag, startsWithFolder } from "../src/services/naming"
-import { pickBest, pickPoster, pickBackdrop, matchMovie, matchTmdb, downloadPoster, downloadArtwork, sniffImageExt, hasPoster, hasBackdrop, hasLogo } from "../src/services/artwork"
+import { pickBest, pickPoster, pickBackdrop, matchMovie, matchTmdb, downloadPoster, downloadArtwork, sniffImageExt, hasPoster, hasBackdrop, hasLogo, hasLandscape, pickFanart, chooseArtworkUrls } from "../src/services/artwork"
 import { organizeMovie } from "../src/services/organizer"
 import { duplicateSubtitles } from "../src/services/subtitles"
 import { runPipeline } from "../src/services/pipeline"
@@ -23,7 +23,7 @@ const baseConfig = (over: Partial<AppConfig> = {}): AppConfig => ({
   llmProvider: "gemini", geminiApiKey: "g", groqApiKey: "", ollamaBaseUrl: "", ollamaModel: "",
   llmAutoRetry: "off",
   opensubsApiKey: "", opensubsUsername: "", opensubsPassword: "",
-  tmdbApiKey: "", posterLanguages: "de,en,null", tmdbIdInFolder: "off",
+  tmdbApiKey: "", fanartApiKey: "", posterLanguages: "de,en,null", tmdbIdInFolder: "off",
   handbrakePresetDVD: "", handbrakePresetBluRay: "", handbrakePreset4K: "",
   handbrakePath: "HandBrakeCLI-does-not-exist", mkvmergePath: "mkvmerge-does-not-exist", mkvextractPath: "x",
   sourceDir: "", outputDir: "", folderPattern: "{title} ({year})", filePattern: "{title} ({year}) - [{format}]",
@@ -106,6 +106,28 @@ const mockFetch = async (input: any, init?: any) => {
     ] },
   })
   if (url.includes("/movie/404/images")) return json({ posters: [], backdrops: [], logos: [] })
+  // Movie 603: TMDB has only a backdrop with text and no logo -> fanart.tv fills the gaps
+  if (url.includes("/movie/603/images")) return json({
+    posters: [{ file_path: "/m603_poster.jpg", iso_639_1: "de", vote_average: 5, vote_count: 3, width: 2000 }],
+    backdrops: [{ file_path: "/m603_de_text.jpg", iso_639_1: "de", vote_average: 5, vote_count: 3, width: 3840 }],
+    logos: [],
+  })
+  if (url.startsWith("https://webservice.fanart.tv/v3/movies/603")) return json({
+    moviebackground: [
+      { id: "1", url: "https://assets.fanart.tv/fanart/bg_en.jpg", lang: "en", likes: "9" },
+      { id: "2", url: "https://assets.fanart.tv/fanart/bg_textless.jpg", lang: "00", likes: "1" },
+    ],
+    hdmovielogo: [
+      { id: "3", url: "https://assets.fanart.tv/fanart/logo_en.png", lang: "en", likes: "5" },
+      { id: "4", url: "https://assets.fanart.tv/fanart/logo_de.png", lang: "de", likes: "2" },
+    ],
+    moviethumb: [{ id: "5", url: "https://assets.fanart.tv/fanart/thumb_de.jpg", lang: "de", likes: "1" }],
+  })
+  if (url.startsWith("https://webservice.fanart.tv/")) return json({ status: "error", "error message": "Not found" }, 404)
+  if (url.startsWith("https://assets.fanart.tv/") && url.endsWith(".png"))
+    return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => PNG.buffer }
+  if (url.startsWith("https://assets.fanart.tv/") || url.startsWith("https://image.tmdb.org/t/p/original/m603_"))
+    return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => JPEG.buffer }
   if (url.startsWith("https://image.tmdb.org/t/p/original/de_best.png"))
     return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => PNG.buffer }
   if (url.startsWith("https://image.tmdb.org/t/p/original/de_backdrop.jpg"))
@@ -271,10 +293,86 @@ test("downloadArtwork: downloads poster, backdrop, and logo into the movie folde
   assert.ok(existsSync(join(dir, "backdrop.jpg")), "backdrop.jpg exists")
   assert.ok(existsSync(join(dir, "logo.png")), "logo.png exists")
 
-  // Second run skips when all exist
+  // TMDB only has a textless backdrop -> no separate landscape (would duplicate the backdrop)
+  assert.equal(res.landscape, undefined)
+  assert.equal(hasLandscape(dir), false)
+
+  // Second run downloads nothing new and keeps existing files
   const res2 = await downloadArtwork(m, dir, c)
   assert.equal(res2.ok, true)
-  assert.equal(res2.skipped, true)
+  assert.equal(res2.poster ?? res2.backdrop ?? res2.logo ?? res2.landscape, undefined)
+
+  // Skipped completely once every kind exists
+  writeFileSync(join(dir, "landscape.jpg"), "mine")
+  const res3 = await downloadArtwork(m, dir, c)
+  assert.equal(res3.skipped, true)
+  assert.equal(readFileSync(join(dir, "landscape.jpg"), "utf-8"), "mine")
+})
+test("pickFanart: language order, '00'/'' = textless, likes rank, fallback to any", () => {
+  const imgs = [
+    { url: "en", lang: "en", likes: "9" },
+    { url: "de_low", lang: "de", likes: "1" },
+    { url: "de_high", lang: "de", likes: "4" },
+    { url: "none", lang: "00", likes: "2" },
+    { url: "legacy_none", lang: "", likes: "7" },
+  ]
+  assert.equal(pickFanart(imgs, ["de", "en", "null"])!.url, "de_high")
+  assert.equal(pickFanart(imgs, ["null", "de"])!.url, "legacy_none")
+  assert.equal(pickFanart(imgs, ["fr"])!.url, "en") // nothing in fr -> most liked overall
+  assert.equal(pickFanart([], ["de"]), null)
+  assert.equal(pickFanart(undefined, ["de"]), null)
+})
+test("chooseArtworkUrls: TMDB textless backdrop wins, fanart fills gaps, landscape fallback", () => {
+  const langs = ["de", "en", "null"]
+  const fan = {
+    moviebackground: [{ url: "F_BG", lang: "00", likes: 1 }],
+    hdmovielogo: [{ url: "F_LOGO", lang: "de", likes: 1 }],
+    moviethumb: [{ url: "F_THUMB", lang: "de", likes: 1 }],
+    movieposter: [{ url: "F_POSTER", lang: "de", likes: 1 }],
+  }
+  const T = "https://image.tmdb.org/t/p/original"
+  // TMDB complete with textless backdrop: TMDB everywhere, landscape from fanart thumb
+  const full = { posters: [{ file_path: "/p.jpg", iso_639_1: "de" }], logos: [{ file_path: "/l.png", iso_639_1: "de" }],
+    backdrops: [{ file_path: "/txt.jpg", iso_639_1: "de" }, { file_path: "/clean.jpg", iso_639_1: null }] }
+  assert.deepEqual(chooseArtworkUrls(full, fan, langs),
+    { poster: `${T}/p.jpg`, backdrop: `${T}/clean.jpg`, logo: `${T}/l.png`, landscape: "F_THUMB" })
+  // TMDB without textless backdrop and without logo/poster: fanart.tv steps in
+  const thin = { posters: [], logos: [], backdrops: [{ file_path: "/txt.jpg", iso_639_1: "de" }] }
+  assert.deepEqual(chooseArtworkUrls(thin, fan, langs),
+    { poster: "F_POSTER", backdrop: "F_BG", logo: "F_LOGO", landscape: "F_THUMB" })
+  // No fanart.tv: backdrop with text as last resort, landscape = TMDB backdrop with text
+  assert.deepEqual(chooseArtworkUrls(thin, null, langs, "/search.jpg"),
+    { poster: `${T}/search.jpg`, backdrop: `${T}/txt.jpg`, logo: null, landscape: `${T}/txt.jpg` })
+})
+test("downloadArtwork: fanart.tv supplies textless backdrop, logo and landscape when TMDB lacks them", async () => {
+  const dir = mkdtempSync(join(tmp, "fan-"))
+  calls.length = 0
+  const res = await downloadArtwork(movie({ tmdbId: 603 }), dir, baseConfig({ tmdbApiKey: "k", fanartApiKey: "f" }))
+  assert.equal(res.ok, true)
+  assert.ok(existsSync(join(dir, "poster.jpg")), "poster from TMDB")
+  assert.ok(existsSync(join(dir, "backdrop.jpg")), "backdrop")
+  assert.ok(existsSync(join(dir, "logo.png")), "logo from fanart.tv")
+  assert.ok(existsSync(join(dir, "landscape.jpg")), "landscape from fanart.tv")
+  assert.ok(calls.some((u) => u.includes("/fanart/bg_textless.jpg")), "textless fanart background preferred over liked 'en' one")
+  assert.ok(calls.some((u) => u.includes("/fanart/logo_de.png")), "German logo preferred")
+  assert.ok(calls.some((u) => u.includes("webservice.fanart.tv/v3/movies/603?api_key=f")), "fanart.tv queried by TMDB id")
+})
+test("downloadArtwork: without fanart.tv key, no fanart request and no duplicate landscape", async () => {
+  const dir = mkdtempSync(join(tmp, "nofan-"))
+  calls.length = 0
+  const res = await downloadArtwork(movie({ tmdbId: 603 }), dir, baseConfig({ tmdbApiKey: "k" }))
+  assert.equal(res.ok, true)
+  assert.ok(!calls.some((u) => u.includes("fanart.tv")), "fanart.tv not contacted")
+  assert.ok(existsSync(join(dir, "backdrop.jpg")), "TMDB backdrop with text as last resort")
+  assert.equal(hasLandscape(dir), false, "landscape would be the same image as the backdrop")
+  assert.equal(hasLogo(dir), false)
+})
+test("downloadArtwork: unknown movie on fanart.tv (404) still downloads TMDB artwork", async () => {
+  const dir = mkdtempSync(join(tmp, "fan404-"))
+  const res = await downloadArtwork(movie({ tmdbId: 238 }), dir, baseConfig({ tmdbApiKey: "k", fanartApiKey: "f" }))
+  assert.equal(res.ok, true)
+  assert.ok(hasPoster(dir) && hasBackdrop(dir) && hasLogo(dir))
+  assert.equal(hasLandscape(dir), false)
 })
 test("hasBackdrop and hasLogo: identify existing image variations", () => {
   const d = mkdtempSync(join(tmp, "art-has-"))

@@ -46,6 +46,8 @@ export interface AppConfig {
   opensubsUsername: string
   opensubsPassword: string
   tmdbApiKey: string
+  /** fanart.tv personal API key. Optional: fallback/extra source for textless backdrops, logos, landscapes. */
+  fanartApiKey: string
   posterLanguages: string
   tmdbIdInFolder: Toggle
   handbrakePresetDVD: string

@@ -16,6 +16,7 @@ export function loadConfig(): AppConfig {
     opensubsUsername: "",
     opensubsPassword: "",
     tmdbApiKey: process.env.TMDB_API_KEY || "",
+    fanartApiKey: process.env.FANART_API_KEY || "",
     posterLanguages: "de,en,null",
     tmdbIdInFolder: "off",
     handbrakePresetDVD: "HQ 480p30 Surround",

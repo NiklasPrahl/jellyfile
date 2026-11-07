@@ -182,7 +182,98 @@ export function hasBackdrop(dir: string): boolean {
 
 export function hasLogo(dir: string): boolean {
   if (!existsSync(dir)) return false
-  return readdirSync(dir).some((f) => /^(logo|clearlogo)\.(jpe?g|png|webp)$/i.test(f))
+  return readdirSync(dir).some((f) => /^(logo|clearlogo)\.(jpe?g|png|webp|svg)$/i.test(f))
+}
+
+/** Landscape = Jellyfin "Thumb" image (16:9 card, usually with title). */
+export function hasLandscape(dir: string): boolean {
+  if (!existsSync(dir)) return false
+  return readdirSync(dir).some((f) => /^(landscape|thumb)\.(jpe?g|png|webp)$/i.test(f))
+}
+
+// ── fanart.tv ────────────────────────────────────────────────────────────────
+
+const FANART_API = "https://webservice.fanart.tv/v3/movies"
+
+export interface FanartImage {
+  id?: string
+  url: string
+  lang?: string
+  likes?: string | number
+}
+
+/** fanart.tv movie images by TMDB ID. Returns null if the movie is unknown there or the request fails. */
+export async function fetchFanart(tmdbId: number, apiKey: string): Promise<Record<string, FanartImage[]> | null> {
+  if (!apiKey || !tmdbId) return null
+  try {
+    const res = await fetch(`${FANART_API}/${tmdbId}?api_key=${encodeURIComponent(apiKey)}`, {
+      headers: { Accept: "application/json" },
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Picks a fanart.tv image by language preference. fanart.tv marks images without
+ * text as lang "00" (older entries: ""), which maps to our "null" language.
+ * Inside a language the most liked image wins; falls back to any image.
+ */
+export function pickFanart(images: FanartImage[] | undefined, langs: string[]): FanartImage | null {
+  const list = (images || []).filter((i) => i?.url)
+  if (!list.length) return null
+  const rank = (a: FanartImage, b: FanartImage) => Number(b.likes || 0) - Number(a.likes || 0)
+  for (const l of langs) {
+    const codes = l === "null" ? ["00", ""] : [l]
+    const group = list.filter((i) => codes.includes(i.lang ?? ""))
+    if (group.length) return [...group].sort(rank)[0]
+  }
+  return [...list].sort(rank)[0]
+}
+
+function tmdbUrl(path?: string | null): string | null {
+  return path ? `${IMAGE_BASE}${path}` : null
+}
+
+/**
+ * Chooses the image URL for each artwork kind. Pure function (testable):
+ * - poster:    TMDB by language → search poster → fanart.tv
+ * - backdrop:  TMDB textless → fanart.tv background (textless preferred) → TMDB with text
+ * - logo:      TMDB by language → fanart.tv HD logo → fanart.tv logo
+ * - landscape: fanart.tv thumb → TMDB backdrop with text (a title card, like a landscape)
+ */
+export function chooseArtworkUrls(
+  tmdb: any,
+  fanart: Record<string, FanartImage[]> | null,
+  langs: string[],
+  searchPoster?: string
+): { poster: string | null; backdrop: string | null; logo: string | null; landscape: string | null } {
+  const textLangs = langs.filter((l) => l !== "null")
+  const backdrops: any[] = tmdb?.backdrops || []
+  const textless = backdrops.filter((b) => (b.iso_639_1 ?? null) === null)
+  const withText = backdrops.filter((b) => (b.iso_639_1 ?? null) !== null)
+
+  const poster =
+    tmdbUrl(pickPoster(tmdb?.posters || [], langs)?.file_path || searchPoster) ||
+    pickFanart(fanart?.movieposter, langs)?.url || null
+
+  const backdrop =
+    tmdbUrl(pickPoster(textless, ["null"])?.file_path) ||
+    pickFanart(fanart?.moviebackground, ["null", ...textLangs])?.url ||
+    tmdbUrl(pickBackdrop(backdrops, langs)?.file_path) || null
+
+  const logo =
+    tmdbUrl(pickPoster(tmdb?.logos || [], langs)?.file_path) ||
+    pickFanart(fanart?.hdmovielogo, langs)?.url ||
+    pickFanart(fanart?.movielogo, langs)?.url || null
+
+  const landscape =
+    pickFanart(fanart?.moviethumb, langs)?.url ||
+    (withText.length ? tmdbUrl(pickPoster(withText, textLangs)?.file_path) : null) || null
+
+  return { poster, backdrop, logo, landscape }
 }
 
 export interface PosterResult {
@@ -198,16 +289,17 @@ export interface ArtworkResult {
   poster?: string
   backdrop?: string
   logo?: string
+  landscape?: string
   reason?: string
 }
 
 async function downloadSingleImage(
-  path: string,
+  pathOrUrl: string,
   baseName: string,
   dir: string
 ): Promise<{ ok: boolean; file?: string; reason?: string }> {
   try {
-    const res = await fetch(`${IMAGE_BASE}${path}`)
+    const res = await fetch(/^https?:\/\//.test(pathOrUrl) ? pathOrUrl : `${IMAGE_BASE}${pathOrUrl}`)
     if (!res.ok) return { ok: false, reason: `download failed (${res.status})` }
     const buf = new Uint8Array(await res.arrayBuffer())
     const ext = sniffImageExt(buf)
@@ -227,9 +319,11 @@ async function downloadSingleImage(
 /**
  * Downloads all primary artwork for Jellyfin:
  * - poster.<ext>
- * - backdrop.<ext> (fanart / background)
+ * - backdrop.<ext> (background, textless preferred)
  * - logo.<ext> (clearlogo / title treatment)
- * Never overwrites existing images.
+ * - landscape.<ext> (Jellyfin "Thumb": 16:9 card with title)
+ * Sources: TMDB first; fanart.tv (if a key is set) for textless backdrops,
+ * landscapes and whatever TMDB lacks. Never overwrites existing images.
  */
 export async function downloadArtwork(
   m: MovieFile,
@@ -239,52 +333,47 @@ export async function downloadArtwork(
   if (!config.tmdbApiKey) return { ok: false, reason: "no TMDB API key" }
   if (!m.tmdbId) return { ok: false, reason: "no TMDB match" }
 
-  const needPoster = !hasPoster(dir)
-  const needBackdrop = !hasBackdrop(dir)
-  const needLogo = !hasLogo(dir)
-
-  if (!needPoster && !needBackdrop && !needLogo) {
+  const need = {
+    poster: !hasPoster(dir),
+    backdrop: !hasBackdrop(dir),
+    logo: !hasLogo(dir),
+    landscape: !hasLandscape(dir),
+  }
+  if (!Object.values(need).some(Boolean)) {
     return { ok: true, skipped: true, reason: "all artwork already exists" }
   }
 
   const langs = parseLanguages(config.posterLanguages)
   const reqLangs = Array.from(new Set([...langs, "null"]))
-  const data = await tmdbGet(
+  const tmdb = await tmdbGet(
     `/movie/${m.tmdbId}/images`,
     { include_image_language: reqLangs.join(",") },
     config.tmdbApiKey
   )
 
+  // fanart.tv only when it can add something: a landscape, a textless backdrop TMDB lacks, or any gap
+  let fanart: Record<string, FanartImage[]> | null = null
+  if (config.fanartApiKey) {
+    const tmdbOnly = chooseArtworkUrls(tmdb, null, langs, m.tmdbPoster)
+    const tmdbHasTextless = (tmdb.backdrops || []).some((b: any) => (b.iso_639_1 ?? null) === null)
+    const gap =
+      need.landscape ||
+      (need.backdrop && !tmdbHasTextless) ||
+      (need.poster && !tmdbOnly.poster) ||
+      (need.logo && !tmdbOnly.logo)
+    if (gap) fanart = await fetchFanart(m.tmdbId, config.fanartApiKey)
+  }
+
+  const urls = chooseArtworkUrls(tmdb, fanart, langs, m.tmdbPoster)
   const result: ArtworkResult = { ok: true }
-
-  // 1. Poster
-  if (needPoster) {
-    const chosen = pickPoster(data.posters || [], langs)
-    const path: string | undefined = chosen?.file_path || m.tmdbPoster
-    if (path) {
-      const dl = await downloadSingleImage(path, "poster", dir)
-      if (dl.ok && dl.file) result.poster = dl.file
-    }
+  for (const kind of ["poster", "backdrop", "logo", "landscape"] as const) {
+    const url = urls[kind]
+    if (!need[kind] || !url) continue
+    // never store the exact same image twice (landscape fallback vs. backdrop)
+    if (kind === "landscape" && url === urls.backdrop) continue
+    const dl = await downloadSingleImage(url, kind, dir)
+    if (dl.ok && dl.file) result[kind] = dl.file
   }
-
-  // 2. Backdrop ("No Language" / textless preferred)
-  if (needBackdrop) {
-    const chosen = pickBackdrop(data.backdrops || [], langs)
-    if (chosen?.file_path) {
-      const dl = await downloadSingleImage(chosen.file_path, "backdrop", dir)
-      if (dl.ok && dl.file) result.backdrop = dl.file
-    }
-  }
-
-  // 3. Logo (Schriftzugdatei für Jellyfin)
-  if (needLogo) {
-    const chosen = pickPoster(data.logos || [], langs)
-    if (chosen?.file_path) {
-      const dl = await downloadSingleImage(chosen.file_path, "logo", dir)
-      if (dl.ok && dl.file) result.logo = dl.file
-    }
-  }
-
   return result
 }
 

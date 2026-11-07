@@ -23,7 +23,7 @@ A specialized TUI-based pipeline for automated movie disc digitization and organ
 - **HandBrake Integration**: Fully automated conversion pipeline for DVD, Blu-ray, and 4K media.
 - **Subtitle Support**: Automated subtitle extraction and OpenSubtitles integration.
 - **Jellyfin-ready Naming**: One folder per movie, versions told apart by a tag, subtitles that match the video names (see below).
-- **Artwork**: Downloads posters, backdrops, and logos from TMDB in original quality (`poster.<ext>`, `backdrop.<ext>`, `logo.<ext>`). Backdrops prioritize textless images ("No Language"). Existing images are never overwritten.
+- **Artwork**: Downloads posters, backdrops, logos, and landscapes from TMDB in original quality (`poster.<ext>`, `backdrop.<ext>`, `logo.<ext>`, `landscape.<ext>`). Backdrops prioritize textless images ("No Language"). Optional [fanart.tv](https://fanart.tv) integration fills in textless backdrops, landscapes, and anything TMDB lacks. Existing images are never overwritten.
 - **Jellyfin NFO Generation**: Creates compliant `movie.nfo` files with title locking (`<lockedfields>Name</lockedfields>`) when custom titles are set, while keeping `<lockdata>false</lockdata>` and omitting image tags so Jellyfin can still scrape additional online metadata and images.
 - **Customizable Organization**: Define your own folder and file naming structures.
 
@@ -83,6 +83,7 @@ Der Pate (1972)/
   poster.jpg
   backdrop.jpg
   logo.png
+  landscape.jpg
   movie.nfo
 ```
 
@@ -106,17 +107,20 @@ Keep the file pattern starting with the same text as the folder pattern; otherwi
 
 ---
 
-## Artwork & NFO Metadata (TMDB)
+## Artwork & NFO Metadata (TMDB / fanart.tv)
 
 1. Create a free account at [themoviedb.org](https://www.themoviedb.org/) and request an API key (Settings > API). Both the v3 API key and the v4 "API Read Access Token" work.
-2. Enter it in **Settings > Artwork (TMDB) > TMDB API Key** (or set `TMDB_API_KEY`).
-3. In the review step a column shows which TMDB movie was matched. If it is wrong, edit title/year (`T` / `Y`); the match is refreshed automatically.
-4. During processing, artwork is saved next to the movie in original quality:
+2. Enter it in **Settings > Artwork (TMDB / fanart.tv) > TMDB API Key** (or set `TMDB_API_KEY`).
+3. *(Optional)* Get a free personal API key at [fanart.tv](https://fanart.tv/get-an-api-key/) and enter it under **fanart.tv API Key** (or set `FANART_API_KEY`). fanart.tv is only contacted when it can add something (see below).
+4. In the review step a column shows which TMDB movie was matched. If it is wrong, edit title/year (`T` / `Y`); the match is refreshed automatically.
+5. During processing, artwork is saved next to the movie in original quality:
    - **Posters**: `poster.<ext>` according to language preference (`Poster Langs`, default `de,en,null`).
-   - **Backdrops**: `backdrop.<ext>` — textless backdrops (`null` / "No Language") are prioritized to ensure clean backgrounds without burned-in text.
-   - **Logos**: `logo.<ext>` (clearlogo).
+   - **Backdrops**: `backdrop.<ext>` — textless backdrops are prioritized to ensure clean backgrounds without burned-in text. Order: TMDB textless → fanart.tv background (textless preferred) → TMDB backdrop with text.
+   - **Logos**: `logo.<ext>` (clearlogo). Order: TMDB by language → fanart.tv HD logo → fanart.tv logo.
+   - **Landscapes**: `landscape.<ext>` (Jellyfin "Thumb", a 16:9 title card used e.g. in *Continue Watching*). Order: fanart.tv thumb → TMDB backdrop with text. Skipped if it would be the same image as the backdrop.
+   - **Posters** fall back to fanart.tv if TMDB has none.
    - Existing artwork is never overwritten.
-5. **Jellyfin NFO generation (`movie.nfo`)**:
+6. **Jellyfin NFO generation (`movie.nfo`)**:
    - Generates compliant XML metadata with `<lockdata>false</lockdata>` so Jellyfin can fetch further online metadata, backdrops, and logos.
    - If an edited/custom title is set, only the title is locked: `<lockedfields>Name</lockedfields>`.
    - No forced image path tags (`<art>`, `<thumb>`, `<fanart>`, `<poster>`) are written into the NFO, ensuring Jellyfin's online scrapers and local images coexist smoothly.
