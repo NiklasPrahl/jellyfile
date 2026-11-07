@@ -13,7 +13,7 @@ import { organizeMovie } from "../src/services/organizer"
 import { duplicateSubtitles } from "../src/services/subtitles"
 import { runPipeline } from "../src/services/pipeline"
 import { resolveTitles } from "../src/services/gemini"
-import { buildNfoXml, writeNfo } from "../src/services/nfo"
+import { buildNfoXml, updateNfoXml, writeNfo, esc, resolveNfoPath } from "../src/services/nfo"
 import { scanDirectory, detectFormat, extractBaseName, extractYear } from "../src/services/scanner"
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6])
@@ -327,7 +327,7 @@ test("resolveTitles: LLM titles are sanitized for Jellyfin", async () => {
 })
 
 // ---- NFO generation ---------------------------------------------------------
-test("buildNfoXml: contains required Jellyfin fields", () => {
+test("buildNfoXml: contains required Jellyfin fields and lockdata=false", () => {
   const d = {
     id: 238, title: "Der Pate", original_title: "The Godfather",
     original_language: "en", overview: "Mafia.",
@@ -359,30 +359,165 @@ test("buildNfoXml: contains required Jellyfin fields", () => {
   assert.ok(xml.includes("<year>1972</year>"), "year")
   assert.ok(xml.includes("<genre>Krimi</genre>"), "genre")
   assert.ok(xml.includes("<runtime>175</runtime>"), "runtime")
-  assert.ok(xml.includes("<lockdata>true</lockdata>"), "lockdata")
+  assert.ok(xml.includes("<lockdata>false</lockdata>"), "lockdata is false")
+  assert.ok(!xml.includes("<lockdata>true</lockdata>"), "lockdata is never true")
   assert.ok(xml.includes("plugin://plugin.video.youtube/play/?video_id=abc123"), "trailer")
   assert.ok(xml.includes("<name>Der Pate Filmreihe</name>"), "collection set")
   assert.ok(xml.includes("<name>Marlon Brando</name>"), "actor name")
   assert.ok(xml.includes("<role>Don Vito Corleone</role>"), "actor role")
 })
 
-test("writeNfo: creates movie.nfo via mocked TMDB; skips if already exists", async () => {
+test("NFO: title with special characters is properly XML-escaped", () => {
+  const specialTitle = 'Tom & Jerry: <The "Movie"> \'2021\''
+  const xml = buildNfoXml({}, { customTitle: specialTitle })
+  assert.ok(
+    xml.includes("<title>Tom &amp; Jerry: &lt;The &quot;Movie&quot;&gt; &apos;2021&apos;</title>"),
+    "special characters & < > \" ' are escaped"
+  )
+  assert.ok(!xml.includes("<title>Tom & Jerry"), "raw & not in title")
+  assert.ok(!xml.includes("<The"), "raw < not in title")
+})
+
+test("NFO: with custom title contains <lockedfields>Name</lockedfields> and <lockdata>false</lockdata>", () => {
+  const xml = buildNfoXml({ title: "Original" }, { customTitle: "Mein eigener Titel" })
+  assert.ok(xml.includes("<title>Mein eigener Titel</title>"), "custom title in XML")
+  assert.ok(xml.includes("<lockdata>false</lockdata>"), "lockdata is false")
+  assert.ok(!xml.includes("<lockdata>true</lockdata>"), "lockdata is not true")
+  assert.ok(xml.includes("<lockedfields>Name</lockedfields>"), "lockedfields is Name")
+})
+
+test("NFO: without custom title contains NO <lockedfields> tag", () => {
+  const xml = buildNfoXml({ title: "Der Pate" })
+  assert.ok(xml.includes("<title>Der Pate</title>"), "standard title in XML")
+  assert.ok(xml.includes("<lockdata>false</lockdata>"), "lockdata is false")
+  assert.ok(!xml.includes("<lockedfields>"), "lockedfields tag must not be present without custom title")
+})
+
+test("NFO: never creates lockdata=true and never contains an image path", () => {
+  const xml1 = buildNfoXml({ title: "Film", poster_path: "/img.jpg" }, { customTitle: "Film" })
+  const xml2 = buildNfoXml({})
+
+  for (const xml of [xml1, xml2]) {
+    assert.ok(!xml.includes("<lockdata>true</lockdata>"), "never lockdata=true")
+    assert.ok(!xml.includes("<art>"), "no <art> tag")
+    assert.ok(!xml.includes("<thumb"), "no <thumb> tag")
+    assert.ok(!xml.includes("<fanart"), "no <fanart> tag")
+    assert.ok(!xml.includes("<poster"), "no <poster> tag")
+  }
+})
+
+test("updateNfoXml: reads existing NFO, removes lockdata=true, keeps other tags, updates title and lockedfields", () => {
+  const existing = `<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <plot>Ein großartiger Film über das Leben.</plot>
+  <lockdata>true</lockdata>
+  <title>Alter Titel</title>
+  <lockedfields>Name|Overview|Genres</lockedfields>
+  <art>
+    <fanart>http://example.com/art.jpg</fanart>
+  </art>
+  <thumb aspect="poster">http://example.com/thumb.jpg</thumb>
+  <director>Francis Ford Coppola</director>
+  <year>1972</year>
+</movie>
+`
+  const updated = updateNfoXml(existing, { customTitle: "Mein neuer Titel" })
+  assert.ok(updated.includes("<title>Mein neuer Titel</title>"), "title updated")
+  assert.ok(updated.includes("<lockdata>false</lockdata>"), "lockdata changed to false")
+  assert.ok(!updated.includes("<lockdata>true</lockdata>"), "lockdata true removed")
+  assert.ok(updated.includes("<lockedfields>Name</lockedfields>"), "lockedfields cleaned to Name")
+  assert.ok(!updated.includes("Overview"), "Overview removed from lockedfields")
+  assert.ok(!updated.includes("Genres"), "Genres removed from lockedfields")
+  assert.ok(updated.includes("<plot>Ein großartiger Film über das Leben.</plot>"), "plot preserved")
+  assert.ok(updated.includes("<director>Francis Ford Coppola</director>"), "director preserved")
+  assert.ok(updated.includes("<year>1972</year>"), "year preserved")
+  assert.ok(!updated.includes("<art>"), "art tag removed")
+  assert.ok(!updated.includes("<thumb"), "thumb tag removed")
+  assert.ok(!updated.includes("<fanart"), "fanart tag removed")
+})
+
+test("updateNfoXml: without custom title removes <lockedfields>", () => {
+  const existing = `<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Film</title>
+  <lockdata>true</lockdata>
+  <lockedfields>Name</lockedfields>
+</movie>
+`
+  const updated = updateNfoXml(existing)
+  assert.ok(updated.includes("<title>Film</title>"), "title kept")
+  assert.ok(updated.includes("<lockdata>false</lockdata>"), "lockdata false")
+  assert.ok(!updated.includes("<lockedfields>"), "lockedfields removed when no custom title")
+})
+
+test("updateNfoXml: allows additional locked fields when explicitly requested", () => {
+  const existing = `<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Film</title>
+  <lockedfields>Name|Overview|Tagline</lockedfields>
+</movie>
+`
+  const updated = updateNfoXml(existing, {
+    customTitle: "Film Neu",
+    lockedFields: ["Name", "Overview"],
+  })
+  assert.ok(updated.includes("<lockedfields>Name|Overview</lockedfields>"), "explicit lockedFields respected")
+})
+
+test("writeNfo: creates movie.nfo via mocked TMDB and updates existing NFO on second run", async () => {
   const dir = mkdtempSync(join(tmp, "nfo-"))
-  const m = movie({ tmdbId: 238 })
+  const m = movie({ tmdbId: 238, resolvedTitle: "Der Pate" })
   const cfg = baseConfig({ tmdbApiKey: "k" })
 
+  // 1. Initial write
   const res = await writeNfo(m, dir, cfg)
-  assert.ok(res.ok, "writeNfo succeeds")
-  assert.ok(!res.skipped, "first write is not skipped")
+  assert.ok(res.ok, "first writeNfo succeeds")
+  assert.ok(!res.updated, "first write is create, not update")
   assert.ok(existsSync(join(dir, "movie.nfo")), "movie.nfo created")
-  const content = readFileSync(join(dir, "movie.nfo"), "utf-8")
+  let content = readFileSync(join(dir, "movie.nfo"), "utf-8")
   assert.ok(content.includes("<tmdbid>238</tmdbid>"), "tmdbid in file")
   assert.ok(content.includes("<title>Der Pate</title>"), "title in file")
+  assert.ok(content.includes("<lockdata>false</lockdata>"), "lockdata false in created file")
+  assert.ok(content.includes("<lockedfields>Name</lockedfields>"), "lockedfields Name in created file")
 
-  // Second call must skip (never overwrite)
+  // 2. Second call with updated title -> reads and updates existing file
+  m.resolvedTitle = "Der Pate (Sonderedition)"
   const res2 = await writeNfo(m, dir, cfg)
-  assert.ok(res2.ok && res2.skipped, "second call is skipped")
+  assert.ok(res2.ok, "second writeNfo succeeds")
+  assert.ok(res2.updated, "second call updates existing NFO")
+  content = readFileSync(join(dir, "movie.nfo"), "utf-8")
+  assert.ok(content.includes("<title>Der Pate (Sonderedition)</title>"), "updated title in file")
+  assert.ok(content.includes("<tmdbid>238</tmdbid>"), "tmdbid preserved")
+  assert.ok(content.includes("<lockdata>false</lockdata>"), "lockdata remains false")
 })
+
+test("resolveNfoPath: supports movie.nfo and video-named NFO (Film.nfo neben Film.mkv)", () => {
+  const dir = mkdtempSync(join(tmp, "nfopath-"))
+  assert.equal(resolveNfoPath(dir), join(dir, "movie.nfo"), "defaults to movie.nfo")
+
+  // Explicit filename option
+  assert.equal(
+    resolveNfoPath(dir, undefined, { filename: "Film.nfo" }),
+    join(dir, "Film.nfo"),
+    "uses explicit filename"
+  )
+
+  // useVideoFileName option
+  assert.equal(
+    resolveNfoPath(dir, { originalName: "Matrix (1999).mkv" }, { useVideoFileName: true }),
+    join(dir, "Matrix (1999).nfo"),
+    "uses video name when requested"
+  )
+
+  // Existing video-named NFO in directory takes precedence over default
+  writeFileSync(join(dir, "Matrix (1999).nfo"), "<movie/>")
+  assert.equal(
+    resolveNfoPath(dir),
+    join(dir, "Matrix (1999).nfo"),
+    "finds existing .nfo in directory"
+  )
+})
+
 
 
 
